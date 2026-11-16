@@ -11,6 +11,24 @@ typedef struct {
     char destination[VP_PATH];
 } TransferLog;
 
+typedef struct {
+    int calls;
+    char url[VP_URL];
+    char bearer[VP_TEXT];
+} FetchLog;
+
+static bool fake_fetch(const char *url, const char *bearer_token,
+                       char *response, size_t response_capacity, void *context) {
+    FetchLog *log = context;
+    const char *payload = "{\"items\":[{\"id\":99,\"name\":\"F-Zero\",\"platform_slug\":\"snes\","
+                          "\"url_cover\":\"/assets/fzero.png\",\"download_url\":\"/api/file/fzero.sfc\"}]}";
+    log->calls++;
+    (void)snprintf(log->url, sizeof(log->url), "%s", url);
+    (void)snprintf(log->bearer, sizeof(log->bearer), "%s", bearer_token);
+    (void)snprintf(response, response_capacity, "%s", payload);
+    return true;
+}
+
 static bool fake_transfer(const char *url, const char *destination,
                           VpTransferAction action, void *context) {
     TransferLog *log = context;
@@ -96,6 +114,37 @@ static void test_local_library(void) {
     assert(vp_catalog_find(&catalog, "local:snes-smw")->installed);
 }
 
+static void test_romm_sync(void) {
+    VpCatalog catalog;
+    FetchLog fetch_log;
+    TransferLog transfer_log;
+    VpFetchBackend fetch_backend;
+    VpTransferBackend transfer_backend;
+    VpRommConfig config;
+    VpItem *item;
+
+    memset(&fetch_log, 0, sizeof(fetch_log));
+    memset(&transfer_log, 0, sizeof(transfer_log));
+    memset(&config, 0, sizeof(config));
+    (void)snprintf(config.base_url, sizeof(config.base_url), "http://romm.local/");
+    (void)snprintf(config.token, sizeof(config.token), "rmm_test_token");
+    fetch_backend.execute = fake_fetch;
+    fetch_backend.context = &fetch_log;
+    transfer_backend.execute = fake_transfer;
+    transfer_backend.context = &transfer_log;
+    vp_catalog_init(&catalog);
+    assert(vp_romm_sync(&catalog, &config, fetch_backend));
+    assert(fetch_log.calls == 1);
+    assert(strcmp(fetch_log.url, "http://romm.local/api/roms?limit=250&offset=0") == 0);
+    assert(strcmp(fetch_log.bearer, "rmm_test_token") == 0);
+    item = vp_catalog_find(&catalog, "romm:99");
+    assert(item != NULL);
+    assert(strcmp(item->cover_url, "http://romm.local/assets/fzero.png") == 0);
+    assert(vp_cache_cover(item, "ux0:data/vitaplus/cache/fzero.png", transfer_backend));
+    assert(transfer_log.calls == 1);
+    assert(strcmp(transfer_log.url, "http://romm.local/assets/fzero.png") == 0);
+}
+
 static void test_providers_and_transfers(void) {
     VpCatalog catalog;
     TransferLog log;
@@ -132,6 +181,7 @@ int main(void) {
     test_shell_catalog();
     test_theme();
     test_local_library();
+    test_romm_sync();
     test_providers_and_transfers();
     puts("vitaplus core tests: PASS");
     return 0;

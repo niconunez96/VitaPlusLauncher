@@ -293,6 +293,7 @@ static bool vp_import_items(VpCatalog *catalog, const char *json, VpSource sourc
             continue;
         }
         (void)snprintf(item.id, sizeof(item.id), "%s:%s", vp_source_name(source), remote_id);
+        vp_copy(item.remote_id, sizeof(item.remote_id), remote_id);
         if (!vp_json_value(cursor, end, "name", item.title, sizeof(item.title))) {
             (void)vp_json_value(cursor, end, "title", item.title, sizeof(item.title));
         }
@@ -372,6 +373,57 @@ bool vp_local_import_manifest(VpCatalog *catalog, const char *manifest) {
 
 bool vp_romm_import(VpCatalog *catalog, const char *json) {
     return vp_import_items(catalog, json, VP_SOURCE_ROMM, VP_KIND_ROM, "romm");
+}
+
+static bool vp_join_url(char *destination, size_t capacity,
+                        const char *base_url, const char *path) {
+    size_t base_length;
+    size_t path_offset = 0;
+    size_t path_length;
+    if (destination == NULL || base_url == NULL || path == NULL || capacity == 0) return false;
+    base_length = strlen(base_url);
+    while (base_length > 0 && base_url[base_length - 1] == '/') base_length--;
+    while (path[path_offset] == '/') path_offset++;
+    path_length = strlen(path + path_offset);
+    if (base_length + 1 + path_length + 1 > capacity) return false;
+    memcpy(destination, base_url, base_length);
+    destination[base_length] = '/';
+    memcpy(destination + base_length + 1, path + path_offset, path_length + 1);
+    return true;
+}
+
+bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
+                  VpFetchBackend backend) {
+    char url[VP_URL];
+    char response[32768];
+    size_t index;
+    if (catalog == NULL || config == NULL || config->base_url[0] == '\0' ||
+        config->token[0] == '\0' || backend.execute == NULL) return false;
+    if (!vp_join_url(url, sizeof(url), config->base_url, "/api/roms?limit=250&offset=0")) return false;
+    if (!backend.execute(url, config->token, response, sizeof(response), backend.context)) return false;
+    if (!vp_romm_import(catalog, response)) return false;
+
+    for (index = 0; index < catalog->count; index++) {
+        VpItem *item = &catalog->items[index];
+        char absolute[VP_URL];
+        if (item->source != VP_SOURCE_ROMM) continue;
+        if (item->cover_url[0] != '\0' && item->cover_url[0] == '/' &&
+            vp_join_url(absolute, sizeof(absolute), config->base_url, item->cover_url)) {
+            vp_copy(item->cover_url, sizeof(item->cover_url), absolute);
+        }
+        if (item->download_url[0] != '\0' && item->download_url[0] == '/' &&
+            vp_join_url(absolute, sizeof(absolute), config->base_url, item->download_url)) {
+            vp_copy(item->download_url, sizeof(item->download_url), absolute);
+        }
+    }
+    return true;
+}
+
+bool vp_cache_cover(const VpItem *item, const char *destination,
+                    VpTransferBackend backend) {
+    if (item == NULL || destination == NULL || item->cover_url[0] == '\0' ||
+        backend.execute == NULL) return false;
+    return backend.execute(item->cover_url, destination, VP_TRANSFER_DOWNLOAD, backend.context);
 }
 
 bool vp_homebrew_import(VpCatalog *catalog, const char *json) {

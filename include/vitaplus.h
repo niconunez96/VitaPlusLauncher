@@ -44,6 +44,7 @@ typedef struct {
     char platform[VP_TEXT];
     char description[VP_TEXT];
     char launch_target[VP_PATH];
+    char remote_id[32];
     char download_url[VP_URL];
     char cover_url[VP_URL];
     VpSource source;
@@ -80,6 +81,19 @@ typedef struct {
     size_t selected_item;
 } VpApp;
 
+typedef bool (*VpFetchFn)(const char *url, const char *bearer_token,
+                          char *response, size_t response_capacity, void *context);
+
+typedef struct {
+    VpFetchFn execute;
+    void *context;
+} VpFetchBackend;
+
+typedef struct {
+    char base_url[VP_URL];
+    char token[VP_TEXT];
+} VpRommConfig;
+
 typedef enum {
     VP_TRANSFER_DOWNLOAD,
     VP_TRANSFER_INSTALL_VPK
@@ -87,6 +101,7 @@ typedef enum {
 
 typedef bool (*VpTransferFn)(const char *url, const char *destination,
                              VpTransferAction action, void *context);
+
 
 typedef struct {
     VpTransferFn execute;
@@ -113,6 +128,10 @@ const char *vp_view_name(VpView view);
 
 bool vp_local_import_manifest(VpCatalog *catalog, const char *manifest);
 bool vp_romm_import(VpCatalog *catalog, const char *json);
+bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
+                  VpFetchBackend backend);
+bool vp_cache_cover(const VpItem *item, const char *destination,
+                    VpTransferBackend backend);
 bool vp_homebrew_import(VpCatalog *catalog, const char *json);
 bool vp_queue_download(const VpItem *item, const char *destination,
                        VpTransferBackend backend);
