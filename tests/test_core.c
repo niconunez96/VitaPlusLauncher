@@ -39,6 +39,13 @@ static void test_shell_catalog(void) {
 
     vp_app_init(&app);
     assert(app.active_view == VP_VIEW_GRID);
+    assert(app.active_screen == VP_SCREEN_HOME);
+    vp_app_cycle_screen(&app, -1);
+    assert(app.active_screen == VP_SCREEN_SETTINGS);
+    vp_app_cycle_screen(&app, 1);
+    assert(app.active_screen == VP_SCREEN_HOME);
+    vp_app_cycle_view(&app);
+    assert(app.active_view == VP_VIEW_LIST);
     assert(vp_catalog_add(&app.catalog, &(VpItem){0}) == NULL);
 
     item = vp_catalog_add(&app.catalog, &(VpItem){
@@ -58,6 +65,11 @@ static void test_shell_catalog(void) {
     vp_item_mark_played(&app.catalog.items[1], 200);
     assert(vp_catalog_recent(&app.catalog, indexes, 4) == 2);
     assert(indexes[0] == 1);
+    vp_app_select(&app, 1);
+    assert(app.selected_item == 1);
+    vp_app_select(&app, 1);
+    assert(app.selected_item == 0);
+    assert(strcmp(vp_screen_name(VP_SCREEN_STORES), "Tiendas") == 0);
 }
 
 static void test_theme(void) {
@@ -71,6 +83,17 @@ static void test_theme(void) {
     assert(theme.view == VP_VIEW_CAROUSEL);
     assert(theme.card_width == 170);
     assert(!vp_theme_load(&theme, "id=x\nname=x\nview=broken\n"));
+}
+
+static void test_local_library(void) {
+    VpCatalog catalog;
+    const char *manifest = "pcse00120|Persona 4 Golden|PS Vita|PCSE00120\n"
+                           "snes-smw|Super Mario World|SNES|ux0:data/roms/snes/smw.sfc\n";
+    vp_catalog_init(&catalog);
+    assert(vp_local_import_manifest(&catalog, manifest));
+    assert(catalog.count == 2);
+    assert(vp_catalog_find(&catalog, "local:pcse00120") != NULL);
+    assert(vp_catalog_find(&catalog, "local:snes-smw")->installed);
 }
 
 static void test_providers_and_transfers(void) {
@@ -108,6 +131,7 @@ int main(void) {
     assert(strcmp(sample.title, "Sample") == 0);
     test_shell_catalog();
     test_theme();
+    test_local_library();
     test_providers_and_transfers();
     puts("vitaplus core tests: PASS");
     return 0;

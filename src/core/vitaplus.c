@@ -194,6 +194,45 @@ void vp_app_init(VpApp *app) {
     app->theme.card_width = 154;
     app->theme.card_height = 216;
     app->active_view = VP_VIEW_GRID;
+    app->active_screen = VP_SCREEN_HOME;
+    app->selected_item = 0;
+}
+
+const char *vp_screen_name(VpScreen screen) {
+    switch (screen) {
+        case VP_SCREEN_HOME: return "Inicio";
+        case VP_SCREEN_LIBRARY: return "Biblioteca";
+        case VP_SCREEN_STORES: return "Tiendas";
+        case VP_SCREEN_THEMES: return "Temas";
+        case VP_SCREEN_SETTINGS: return "Ajustes";
+        default: return "Inicio";
+    }
+}
+
+void vp_app_cycle_screen(VpApp *app, int direction) {
+    int value;
+    if (app == NULL || direction == 0) return;
+    value = (int)app->active_screen + (direction > 0 ? 1 : -1);
+    if (value < (int)VP_SCREEN_HOME) value = (int)VP_SCREEN_SETTINGS;
+    if (value > (int)VP_SCREEN_SETTINGS) value = (int)VP_SCREEN_HOME;
+    app->active_screen = (VpScreen)value;
+}
+
+void vp_app_cycle_view(VpApp *app) {
+    if (app == NULL) return;
+    app->active_view = (VpView)(((int)app->active_view + 1) % 3);
+}
+
+void vp_app_select(VpApp *app, int direction) {
+    size_t count;
+    if (app == NULL || direction == 0) return;
+    count = app->catalog.count;
+    if (count == 0) {
+        app->selected_item = 0;
+        return;
+    }
+    if (direction > 0) app->selected_item = (app->selected_item + 1) % count;
+    else app->selected_item = (app->selected_item + count - 1) % count;
 }
 
 static bool vp_parse_view(const char *value, VpView *view) {
@@ -275,6 +314,58 @@ static bool vp_import_items(VpCatalog *catalog, const char *json, VpSource sourc
         }
         if (vp_catalog_add(catalog, &item) != NULL) imported++;
         cursor = end;
+    }
+    return imported > 0;
+}
+
+bool vp_local_import_manifest(VpCatalog *catalog, const char *manifest) {
+    char buffer[4096];
+    char *cursor;
+    size_t imported = 0;
+    if (catalog == NULL || manifest == NULL || strlen(manifest) >= sizeof(buffer)) return false;
+    vp_copy(buffer, sizeof(buffer), manifest);
+    cursor = buffer;
+    while (cursor != NULL && *cursor != '\0') {
+        char *next = strchr(cursor, '\n');
+        char *id;
+        char *title;
+        char *platform;
+        char *target;
+        VpItem item;
+        if (next != NULL) *next++ = '\0';
+        if (*cursor == '\0' || *cursor == '#') {
+            cursor = next;
+            continue;
+        }
+        id = cursor;
+        title = strchr(id, '|');
+        if (title == NULL) {
+            cursor = next;
+            continue;
+        }
+        *title++ = '\0';
+        platform = strchr(title, '|');
+        if (platform == NULL) {
+            cursor = next;
+            continue;
+        }
+        *platform++ = '\0';
+        target = strchr(platform, '|');
+        if (target == NULL) {
+            cursor = next;
+            continue;
+        }
+        *target++ = '\0';
+        vp_default_item(&item);
+        (void)snprintf(item.id, sizeof(item.id), "local:%.180s", id);
+        vp_copy(item.title, sizeof(item.title), title);
+        vp_copy(item.platform, sizeof(item.platform), platform);
+        vp_copy(item.launch_target, sizeof(item.launch_target), target);
+        item.installed = true;
+        item.source = VP_SOURCE_LOCAL;
+        item.kind = VP_KIND_GAME;
+        if (item.title[0] != '\0' && vp_catalog_add(catalog, &item) != NULL) imported++;
+        cursor = next;
     }
     return imported > 0;
 }

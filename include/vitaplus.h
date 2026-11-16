@@ -30,6 +30,14 @@ typedef enum {
     VP_VIEW_CAROUSEL
 } VpView;
 
+typedef enum {
+    VP_SCREEN_HOME,
+    VP_SCREEN_LIBRARY,
+    VP_SCREEN_STORES,
+    VP_SCREEN_THEMES,
+    VP_SCREEN_SETTINGS
+} VpScreen;
+
 typedef struct {
     char id[VP_TEXT];
     char title[VP_TEXT];
@@ -68,6 +76,8 @@ typedef struct {
     VpTheme theme;
     char query[VP_MAX_QUERY];
     VpView active_view;
+    VpScreen active_screen;
+    size_t selected_item;
 } VpApp;
 
 typedef enum {
@@ -84,6 +94,10 @@ typedef struct {
 } VpTransferBackend;
 
 void vp_app_init(VpApp *app);
+void vp_app_cycle_screen(VpApp *app, int direction);
+void vp_app_cycle_view(VpApp *app);
+void vp_app_select(VpApp *app, int direction);
+const char *vp_screen_name(VpScreen screen);
 void vp_catalog_init(VpCatalog *catalog);
 VpItem *vp_catalog_add(VpCatalog *catalog, const VpItem *item);
 VpItem *vp_catalog_find(VpCatalog *catalog, const char *id);
@@ -97,6 +111,7 @@ bool vp_theme_load(VpTheme *theme, const char *ini_text);
 const char *vp_source_name(VpSource source);
 const char *vp_view_name(VpView view);
 
+bool vp_local_import_manifest(VpCatalog *catalog, const char *manifest);
 bool vp_romm_import(VpCatalog *catalog, const char *json);
 bool vp_homebrew_import(VpCatalog *catalog, const char *json);
 bool vp_queue_download(const VpItem *item, const char *destination,

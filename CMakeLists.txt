@@ -17,7 +17,7 @@ if(DEFINED ENV{VITASDK})
 
   add_executable(vitaplus src/vita/main.c)
   target_link_libraries(vitaplus vitaplus_core vita2d CURL::libcurl
-    SceCtrl_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub)
+    SceCtrl_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub ScePgf_stub)
   vita_create_self(eboot.bin vitaplus UNSAFE)
   vita_create_vpk(vitaplus.vpk ${VITA_TITLEID} eboot.bin
     VERSION ${VITA_VERSION}
