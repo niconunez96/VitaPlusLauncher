@@ -14,6 +14,8 @@
 
 static VpRommConfig romm_config;
 static VpHomebrewConfig homebrew_config;
+static VpApp app;
+static VpCatalog romm_catalog;
 static char active_theme[VP_TEXT] = "default";
 static int settings_field;
 static size_t settings_character;
@@ -94,7 +96,6 @@ static bool save_romm_config(void) {
 
 static bool sync_romm_catalog(VpApp *app) {
     VpFetchBackend fetch_backend = {vp_vita_fetch, NULL};
-    VpCatalog romm_catalog;
     size_t index = 0;
     if (app == NULL || romm_config.base_url[0] == '\0' || romm_config.token[0] == '\0') return false;
     vp_catalog_init(&romm_catalog);
@@ -159,7 +160,7 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
 static void download_selected(VpApp *app) {
     VpItem *item;
     VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
-    char destination[256];
+    char destination[VP_TEXT];
     size_t index;
     if (app->catalog.count == 0) return;
     item = &app->catalog.items[app->selected_item];
@@ -173,7 +174,7 @@ static void download_selected(VpApp *app) {
         char path[VP_PATH];
         if (!app->installation_armed) {
             app->installation_armed = true;
-            (void)snprintf(app->notice, sizeof(app->notice), "Presiona X otra vez para instalar %s", item->title);
+            (void)snprintf(app->notice, sizeof(app->notice), "Presiona X otra vez para instalar %.150s", item->title);
             return;
         }
         (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/downloads/%s.vpk", destination);
@@ -186,7 +187,7 @@ static void download_selected(VpApp *app) {
         char path[VP_PATH];
         (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/downloads/%s.rom", destination);
         if (vp_queue_download(item, &romm_config, path, transfer_backend))
-            (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada en %s", path);
+            (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada en %.160s", path);
         else
             (void)snprintf(app->notice, sizeof(app->notice), "Falló la descarga; revisa la red y el archivo");
     }
@@ -285,7 +286,6 @@ static void draw_shell(vita2d_pgf *font, const VpApp *app) {
 }
 
 int main(void) {
-    VpApp app;
     SceCtrlData pad;
     unsigned int previous = 0;
     vita2d_pgf *font;

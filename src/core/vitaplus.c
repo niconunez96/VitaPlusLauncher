@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The Vita frontend is single-threaded; keeping the remote payload off its small stack avoids
+ * a startup crash when providers are configured. */
+static char vp_fetch_response[32768];
+
 static void vp_copy(char *destination, size_t capacity, const char *source) {
     if (capacity == 0) return;
     if (source == NULL) {
@@ -473,7 +477,6 @@ static void vp_romm_normalize_urls(VpCatalog *catalog, const char *base_url) {
 bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
                   VpFetchBackend backend) {
     char url[VP_URL];
-    char response[32768];
     size_t offset;
     bool imported = false;
     if (catalog == NULL || config == NULL || config->base_url[0] == '\0' ||
@@ -485,12 +488,12 @@ bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
         unsigned long total = 0;
         (void)snprintf(path, sizeof(path), "/api/roms?limit=1&offset=%zu", offset);
         if (!vp_join_url(url, sizeof(url), config->base_url, path)) return false;
-        if (!backend.execute(url, config->token, response, sizeof(response), backend.context)) return false;
-        if (!vp_romm_import_page(catalog, response, &page_items)) return false;
+        if (!backend.execute(url, config->token, vp_fetch_response, sizeof(vp_fetch_response), backend.context)) return false;
+        if (!vp_romm_import_page(catalog, vp_fetch_response, &page_items)) return false;
         imported = imported || page_items > 0;
         vp_romm_normalize_urls(catalog, config->base_url);
         if (page_items == 0) break;
-        if (vp_json_value(response, vp_object_end(response), "total", total_text, sizeof(total_text)))
+        if (vp_json_value(vp_fetch_response, vp_object_end(vp_fetch_response), "total", total_text, sizeof(total_text)))
             total = strtoul(total_text, NULL, 10);
         if (total > 0 && offset + 1 >= total) break;
     }
@@ -523,11 +526,10 @@ bool vp_homebrew_import(VpCatalog *catalog, const char *json) {
 
 bool vp_homebrew_sync(VpCatalog *catalog, const VpHomebrewConfig *config,
                       VpFetchBackend backend) {
-    char response[32768];
     if (catalog == NULL || config == NULL || config->catalog_url[0] == '\0' ||
         backend.execute == NULL) return false;
-    if (!backend.execute(config->catalog_url, "", response, sizeof(response), backend.context)) return false;
-    return vp_homebrew_import(catalog, response);
+    if (!backend.execute(config->catalog_url, "", vp_fetch_response, sizeof(vp_fetch_response), backend.context)) return false;
+    return vp_homebrew_import(catalog, vp_fetch_response);
 }
 
 bool vp_queue_download(const VpItem *item, const VpRommConfig *config, const char *destination,
