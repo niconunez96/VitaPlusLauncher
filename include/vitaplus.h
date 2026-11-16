@@ -94,6 +94,10 @@ typedef struct {
     char token[VP_TEXT];
 } VpRommConfig;
 
+typedef struct {
+    char catalog_url[VP_URL];
+} VpHomebrewConfig;
+
 typedef enum {
     VP_TRANSFER_DOWNLOAD,
     VP_TRANSFER_INSTALL_VPK
@@ -133,6 +137,8 @@ bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
 bool vp_cache_cover(const VpItem *item, const char *destination,
                     VpTransferBackend backend);
 bool vp_homebrew_import(VpCatalog *catalog, const char *json);
+bool vp_homebrew_sync(VpCatalog *catalog, const VpHomebrewConfig *config,
+                      VpFetchBackend backend);
 bool vp_queue_download(const VpItem *item, const char *destination,
                        VpTransferBackend backend);
 bool vp_install_homebrew(const VpItem *item, const char *destination,

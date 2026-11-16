@@ -2,12 +2,12 @@
 
 VitaPlus es una shell/launcher homebrew para PS Vita/PSTV: reúne biblioteca local, catálogo personal de RomM y tiendas de homebrew en una interfaz navegable con temas y vistas intercambiables.
 
-> Estado: desarrollo inicial. Las fases 1–3 están implementadas como núcleo portable probado en host y un frontend Vita2D inicial. La compilación de un VPK requiere VitaSDK, que no está instalado en este entorno.
+> Estado: las fases 1–3 están implementadas y probadas en el núcleo portable; el frontend Vita2D muestra la shell inicial. Falta compilar y conectar los adaptadores Vita de HTTP/instalación en hardware porque VitaSDK no está instalado en este entorno.
 
 ## Alcance
 
 - **Fase 1 — Shell:** inicio, biblioteca local, favoritos, recientes, vistas `grid`/`list`/`carousel` y temas `.ini`.
-- **Fase 2 — RomM:** proveedor basado en `GET /api/platforms` y `GET /api/roms`, búsqueda, artwork remoto y cola de descargas.
+- **Fase 2 — RomM:** proveedor basado en `GET /api/roms`, búsqueda, artwork remoto y cola de descargas.
 - **Fase 3 — Homebrew:** catálogo estático compatible con NeoVitaDB/VitaHomebrewDB, búsqueda, detalle, descarga e instalación delegada de VPK.
 
 La tienda oficial de PlayStation queda como acceso delegado a la aplicación oficial: VitaPlus no reproduce, raspa ni automatiza compras/autenticación de Sony.
@@ -17,7 +17,7 @@ La tienda oficial de PlayStation queda como acceso delegado a la aplicación ofi
 ```text
 include/                 API portable del núcleo
 src/core/                modelo, catálogo, temas, providers y transferencias
-a src/vita/              frontend Vita2D inicial
+src/vita/                frontend Vita2D inicial
 themes/default/          tema base editable
 tests/                   pruebas host con gcc
 docs/                    arquitectura y contrato de providers

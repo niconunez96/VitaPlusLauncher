@@ -430,6 +430,15 @@ bool vp_homebrew_import(VpCatalog *catalog, const char *json) {
     return vp_import_items(catalog, json, VP_SOURCE_HOMEBREW, VP_KIND_APP, "PS Vita");
 }
 
+bool vp_homebrew_sync(VpCatalog *catalog, const VpHomebrewConfig *config,
+                      VpFetchBackend backend) {
+    char response[32768];
+    if (catalog == NULL || config == NULL || config->catalog_url[0] == '\0' ||
+        backend.execute == NULL) return false;
+    if (!backend.execute(config->catalog_url, "", response, sizeof(response), backend.context)) return false;
+    return vp_homebrew_import(catalog, response);
+}
+
 bool vp_queue_download(const VpItem *item, const char *destination,
                        VpTransferBackend backend) {
     if (item == NULL || destination == NULL || item->download_url[0] == '\0' ||

@@ -15,13 +15,15 @@ typedef struct {
     int calls;
     char url[VP_URL];
     char bearer[VP_TEXT];
+    const char *payload;
 } FetchLog;
 
 static bool fake_fetch(const char *url, const char *bearer_token,
                        char *response, size_t response_capacity, void *context) {
     FetchLog *log = context;
-    const char *payload = "{\"items\":[{\"id\":99,\"name\":\"F-Zero\",\"platform_slug\":\"snes\","
-                          "\"url_cover\":\"/assets/fzero.png\",\"download_url\":\"/api/file/fzero.sfc\"}]}";
+    const char *payload = log->payload != NULL ? log->payload :
+        "{\"items\":[{\"id\":99,\"name\":\"F-Zero\",\"platform_slug\":\"snes\","
+        "\"url_cover\":\"/assets/fzero.png\",\"download_url\":\"/api/file/fzero.sfc\"}]}";
     log->calls++;
     (void)snprintf(log->url, sizeof(log->url), "%s", url);
     (void)snprintf(log->bearer, sizeof(log->bearer), "%s", bearer_token);
@@ -145,6 +147,31 @@ static void test_romm_sync(void) {
     assert(strcmp(transfer_log.url, "http://romm.local/assets/fzero.png") == 0);
 }
 
+static void test_homebrew_store_sync(void) {
+    VpCatalog catalog;
+    FetchLog fetch_log;
+    VpFetchBackend fetch_backend;
+    VpHomebrewConfig config;
+    VpItem *item;
+
+    memset(&fetch_log, 0, sizeof(fetch_log));
+    memset(&config, 0, sizeof(config));
+    fetch_log.payload = "{\"apps\":[{\"id\":\"vitaftp\",\"name\":\"Vita FTP\","
+                        "\"description\":\"FTP server\",\"url\":\"https://example.org/vitaftp.vpk\"}]}";
+    (void)snprintf(config.catalog_url, sizeof(config.catalog_url),
+                   "https://catalog.example.org/vita.json");
+    fetch_backend.execute = fake_fetch;
+    fetch_backend.context = &fetch_log;
+    vp_catalog_init(&catalog);
+    assert(vp_homebrew_sync(&catalog, &config, fetch_backend));
+    assert(fetch_log.calls == 1);
+    assert(fetch_log.bearer[0] == '\0');
+    item = vp_catalog_find(&catalog, "homebrew:vitaftp");
+    assert(item != NULL);
+    assert(item->kind == VP_KIND_APP);
+    assert(strcmp(item->description, "FTP server") == 0);
+}
+
 static void test_providers_and_transfers(void) {
     VpCatalog catalog;
     TransferLog log;
@@ -182,6 +209,7 @@ int main(void) {
     test_theme();
     test_local_library();
     test_romm_sync();
+    test_homebrew_store_sync();
     test_providers_and_transfers();
     puts("vitaplus core tests: PASS");
     return 0;
