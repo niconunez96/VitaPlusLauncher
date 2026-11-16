@@ -1,0 +1,9 @@
+build/
+dist/
+*.vpk
+*.elf
+*.self
+*.velf
+*.suprx
+*.skprx
+.vscode/
