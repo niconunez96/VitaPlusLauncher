@@ -233,6 +233,7 @@ void vp_app_select(VpApp *app, int direction) {
     }
     if (direction > 0) app->selected_item = (app->selected_item + 1) % count;
     else app->selected_item = (app->selected_item + count - 1) % count;
+    app->installation_armed = false;
 }
 
 static bool vp_parse_view(const char *value, VpView *view) {

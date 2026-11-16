@@ -79,6 +79,8 @@ typedef struct {
     VpView active_view;
     VpScreen active_screen;
     size_t selected_item;
+    bool installation_armed;
+    char notice[VP_TEXT];
 } VpApp;
 
 typedef bool (*VpFetchFn)(const char *url, const char *bearer_token,
