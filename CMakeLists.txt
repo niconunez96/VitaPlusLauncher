@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.18)
+
+if(DEFINED ENV{VITASDK} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+  set(CMAKE_TOOLCHAIN_FILE "$ENV{VITASDK}/share/vita.toolchain.cmake"
+      CACHE FILEPATH "VitaSDK CMake toolchain")
+endif()
+
 project(vitaplus C)
 
 set(CMAKE_C_STANDARD 11)
