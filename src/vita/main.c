@@ -1,4 +1,5 @@
 #include <psp2/ctrl.h>
+#include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
 #include <vita2d.h>
 
@@ -12,6 +13,14 @@
 #define VP_CONFIG_PATH "ux0:data/vitaplus/config.ini"
 
 static VpRommConfig romm_config;
+static VpHomebrewConfig homebrew_config;
+static char active_theme[VP_TEXT] = "default";
+static int settings_field;
+static size_t settings_character;
+static bool settings_editing;
+
+static const char settings_characters[] =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:/._-?&=@";
 
 static void trim(char *value) {
     size_t length;
@@ -43,10 +52,8 @@ static void load_theme_file(VpApp *app, const char *path) {
 
 static void load_providers(VpApp *app) {
     FILE *file = fopen(VP_CONFIG_PATH, "r");
-    VpHomebrewConfig homebrew = {0};
     VpFetchBackend fetch_backend = {vp_vita_fetch, NULL};
     char line[512];
-    char theme_id[VP_TEXT] = "default";
     load_theme_file(app, "app0:assets/default/theme.ini");
     if (file == NULL) return;
     while (fgets(line, sizeof(line), file) != NULL) {
@@ -58,20 +65,95 @@ static void load_providers(VpApp *app) {
         if (strcmp(line, "romm_url") == 0) (void)snprintf(romm_config.base_url, sizeof(romm_config.base_url), "%s", equals);
         else if (strcmp(line, "romm_token") == 0) (void)snprintf(romm_config.token, sizeof(romm_config.token), "%s", equals);
         else if (strcmp(line, "homebrew_catalog") == 0)
-            (void)snprintf(homebrew.catalog_url, sizeof(homebrew.catalog_url), "%s", equals);
+            (void)snprintf(homebrew_config.catalog_url, sizeof(homebrew_config.catalog_url), "%s", equals);
         else if (strcmp(line, "active_theme") == 0)
-            (void)snprintf(theme_id, sizeof(theme_id), "%s", equals);
+            (void)snprintf(active_theme, sizeof(active_theme), "%s", equals);
     }
     fclose(file);
-    if (strcmp(theme_id, "default") != 0) {
+    if (strcmp(active_theme, "default") != 0) {
         char path[VP_PATH];
-        (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/themes/%s/theme.ini", theme_id);
+        (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/themes/%s/theme.ini", active_theme);
         load_theme_file(app, path);
     }
     if (romm_config.base_url[0] != '\0' && romm_config.token[0] != '\0')
         (void)vp_romm_sync(&app->catalog, &romm_config, fetch_backend);
-    if (homebrew.catalog_url[0] != '\0')
-        (void)vp_homebrew_sync(&app->catalog, &homebrew, fetch_backend);
+    if (homebrew_config.catalog_url[0] != '\0')
+        (void)vp_homebrew_sync(&app->catalog, &homebrew_config, fetch_backend);
+}
+
+static bool save_romm_config(void) {
+    FILE *file;
+    (void)sceIoMkdir("ux0:data", 0777);
+    (void)sceIoMkdir("ux0:data/vitaplus", 0777);
+    file = fopen(VP_CONFIG_PATH, "w");
+    if (file == NULL) return false;
+    (void)fprintf(file, "romm_url=%s\nromm_token=%s\nhomebrew_catalog=%s\nactive_theme=%s\n",
+                  romm_config.base_url, romm_config.token, homebrew_config.catalog_url, active_theme);
+    return fclose(file) == 0;
+}
+
+static bool sync_romm_catalog(VpApp *app) {
+    VpFetchBackend fetch_backend = {vp_vita_fetch, NULL};
+    VpCatalog romm_catalog;
+    size_t index = 0;
+    if (app == NULL || romm_config.base_url[0] == '\0' || romm_config.token[0] == '\0') return false;
+    vp_catalog_init(&romm_catalog);
+    if (!vp_romm_sync(&romm_catalog, &romm_config, fetch_backend)) return false;
+    while (index < app->catalog.count) {
+        if (app->catalog.items[index].source == VP_SOURCE_ROMM) {
+            app->catalog.items[index] = app->catalog.items[app->catalog.count - 1];
+            app->catalog.count--;
+        } else {
+            index++;
+        }
+    }
+    for (index = 0; index < romm_catalog.count; index++) {
+        if (vp_catalog_add(&app->catalog, &romm_catalog.items[index]) == NULL) return false;
+    }
+    if (app->selected_item >= app->catalog.count) app->selected_item = 0;
+    return true;
+}
+
+static void settings_append_selected_character(void) {
+    char *value = settings_field == 0 ? romm_config.base_url : romm_config.token;
+    size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_config.token);
+    size_t length = strlen(value);
+    if (length + 1 < capacity) {
+        value[length] = settings_characters[settings_character];
+        value[length + 1] = '\0';
+    }
+}
+
+static void settings_backspace(void) {
+    char *value = settings_field == 0 ? romm_config.base_url : romm_config.token;
+    size_t length = strlen(value);
+    if (length > 0) value[length - 1] = '\0';
+}
+
+static void handle_settings_input(VpApp *app, unsigned int pressed) {
+    if (!settings_editing) {
+        if (pressed & SCE_CTRL_UP) settings_field = 0;
+        if (pressed & SCE_CTRL_DOWN) settings_field = 1;
+        if (pressed & SCE_CTRL_CROSS) settings_editing = true;
+        return;
+    }
+    if (pressed & SCE_CTRL_LEFT) {
+        settings_character = (settings_character + strlen(settings_characters) - 1) % strlen(settings_characters);
+    }
+    if (pressed & SCE_CTRL_RIGHT) settings_character = (settings_character + 1) % strlen(settings_characters);
+    if (pressed & SCE_CTRL_CROSS) settings_append_selected_character();
+    if (pressed & SCE_CTRL_SQUARE) settings_backspace();
+    if (pressed & SCE_CTRL_CIRCLE) settings_editing = false;
+    if (pressed & SCE_CTRL_TRIANGLE) {
+        settings_editing = false;
+        if (!save_romm_config()) {
+            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo guardar la configuracion");
+        } else if (sync_romm_catalog(app)) {
+            (void)snprintf(app->notice, sizeof(app->notice), "RomM sincronizado: %u juegos", (unsigned)app->catalog.count);
+        } else {
+            (void)snprintf(app->notice, sizeof(app->notice), "Guardado; no se pudo sincronizar RomM");
+        }
+    }
 }
 
 static void download_selected(VpApp *app) {
@@ -165,6 +247,27 @@ static void draw_shell(vita2d_pgf *font, const VpApp *app) {
                          "X descarga/instala | L/R secciones | Arriba/Abajo selecciona | Triangulo vista | Cuadrado favorito | Start salir");
     vita2d_pgf_draw_text(font, 28, 112, accent, 1.0f, vp_screen_name(app->active_screen));
     vita2d_pgf_draw_text(font, 734, 112, muted, 0.8f, vp_view_name(app->active_view));
+    if (app->active_screen == VP_SCREEN_SETTINGS) {
+        const char *url_prefix = settings_field == 0 ? "> " : "  ";
+        const char *token_prefix = settings_field == 1 ? "> " : "  ";
+        vita2d_pgf_draw_text(font, 42, 175, text, 0.82f, "RomM server");
+        vita2d_pgf_draw_textf(font, 42, 218, settings_field == 0 ? accent : text, 0.68f,
+                              "%sURL: %s", url_prefix,
+                              romm_config.base_url[0] != '\0' ? romm_config.base_url : "(sin configurar)");
+        vita2d_pgf_draw_textf(font, 42, 258, settings_field == 1 ? accent : text, 0.68f,
+                              "%sToken: %s", token_prefix,
+                              romm_config.token[0] != '\0' ? "********" : "(sin configurar)");
+        if (settings_editing) {
+            vita2d_pgf_draw_textf(font, 42, 314, accent, 0.72f, "Caracter: %c", settings_characters[settings_character]);
+            vita2d_pgf_draw_text(font, 42, 348, muted, 0.58f,
+                                 "Izq/Der caracter | X agrega | Cuadrado borra | Triangulo guarda y sincroniza | Circulo termina");
+        } else {
+            vita2d_pgf_draw_text(font, 42, 314, muted, 0.58f,
+                                 "Arriba/Abajo campo | X editar | Usa token de solo lectura de RomM");
+        }
+        if (app->notice[0] != '\0') vita2d_pgf_draw_text(font, 42, 410, RGBA(245, 174, 79, 255), 0.62f, app->notice);
+        return;
+    }
     if (app->catalog.count == 0) {
         vita2d_pgf_draw_text(font, 28, 160, text, 0.85f,
                              "Sin catalogo. Configura RomM o una tienda homebrew en ux0:data/vitaplus/config.ini");
@@ -202,13 +305,19 @@ int main(void) {
         pressed = pad.buttons & ~previous;
         previous = pad.buttons;
         if (pressed & SCE_CTRL_START) break;
-        if (pressed & SCE_CTRL_LTRIGGER) vp_app_cycle_screen(&app, -1);
-        if (pressed & SCE_CTRL_RTRIGGER) vp_app_cycle_screen(&app, 1);
-        if (pressed & SCE_CTRL_UP) vp_app_select(&app, -1);
-        if (pressed & SCE_CTRL_DOWN) vp_app_select(&app, 1);
-        if (pressed & SCE_CTRL_TRIANGLE) vp_app_cycle_view(&app);
-        if ((pressed & SCE_CTRL_SQUARE) && app.catalog.count > 0) vp_item_toggle_favorite(&app.catalog.items[app.selected_item]);
-        if (pressed & SCE_CTRL_CROSS) download_selected(&app);
+        if (app.active_screen == VP_SCREEN_SETTINGS) {
+            handle_settings_input(&app, pressed);
+            if (!settings_editing && (pressed & SCE_CTRL_LTRIGGER)) vp_app_cycle_screen(&app, -1);
+            if (!settings_editing && (pressed & SCE_CTRL_RTRIGGER)) vp_app_cycle_screen(&app, 1);
+        } else {
+            if (pressed & SCE_CTRL_LTRIGGER) vp_app_cycle_screen(&app, -1);
+            if (pressed & SCE_CTRL_RTRIGGER) vp_app_cycle_screen(&app, 1);
+            if (pressed & SCE_CTRL_UP) vp_app_select(&app, -1);
+            if (pressed & SCE_CTRL_DOWN) vp_app_select(&app, 1);
+            if (pressed & SCE_CTRL_TRIANGLE) vp_app_cycle_view(&app);
+            if ((pressed & SCE_CTRL_SQUARE) && app.catalog.count > 0) vp_item_toggle_favorite(&app.catalog.items[app.selected_item]);
+            if (pressed & SCE_CTRL_CROSS) download_selected(&app);
+        }
         vita2d_start_drawing();
         draw_shell(font, &app);
         vita2d_end_drawing();

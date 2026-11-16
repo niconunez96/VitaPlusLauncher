@@ -42,7 +42,7 @@ cmake --build build/vita
 
 El VPK queda en `build/vita/vitaplus.vpk`.
 
-## Configuración futura en Vita
+## Configuración en Vita
 
 ```text
 ux0:data/vitaplus/config.ini
@@ -51,4 +51,6 @@ ux0:data/vitaplus/cache/
 ux0:data/vitaplus/downloads/
 ```
 
-Nunca compartas `config.ini`: contendrá el token de cliente de RomM.
+En **Ajustes**, seleccioná `URL` o `Token`, presioná `X` para editarlos y usá el selector de caracteres. `Triángulo` guarda ambos valores y sincroniza inmediatamente el catálogo de RomM; los juegos aparecen en las vistas normales como origen `romm`.
+
+Usá la URL base de tu servidor (por ejemplo, `http://192.168.1.100:8080`) y un token de RomM con permisos mínimos de lectura/descarga. Nunca compartas `config.ini`: contiene ese token.
