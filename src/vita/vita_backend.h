@@ -5,7 +5,7 @@
 
 bool vp_vita_fetch(const char *url, const char *bearer_token,
                    char *response, size_t response_capacity, void *context);
-bool vp_vita_transfer(const char *url, const char *destination,
+bool vp_vita_transfer(const char *url, const char *bearer_token, const char *destination,
                       VpTransferAction action, void *context);
 
 #endif

@@ -105,7 +105,7 @@ typedef enum {
     VP_TRANSFER_INSTALL_VPK
 } VpTransferAction;
 
-typedef bool (*VpTransferFn)(const char *url, const char *destination,
+typedef bool (*VpTransferFn)(const char *url, const char *bearer_token, const char *destination,
                              VpTransferAction action, void *context);
 
 
@@ -136,12 +136,12 @@ bool vp_local_import_manifest(VpCatalog *catalog, const char *manifest);
 bool vp_romm_import(VpCatalog *catalog, const char *json);
 bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
                   VpFetchBackend backend);
-bool vp_cache_cover(const VpItem *item, const char *destination,
+bool vp_cache_cover(const VpItem *item, const VpRommConfig *config, const char *destination,
                     VpTransferBackend backend);
 bool vp_homebrew_import(VpCatalog *catalog, const char *json);
 bool vp_homebrew_sync(VpCatalog *catalog, const VpHomebrewConfig *config,
                       VpFetchBackend backend);
-bool vp_queue_download(const VpItem *item, const char *destination,
+bool vp_queue_download(const VpItem *item, const VpRommConfig *config, const char *destination,
                        VpTransferBackend backend);
 bool vp_install_homebrew(const VpItem *item, const char *destination,
                          VpTransferBackend backend);

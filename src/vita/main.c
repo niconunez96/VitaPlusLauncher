@@ -11,6 +11,8 @@
 #define RGBA(r, g, b, a) ((unsigned int)((r) | ((g) << 8) | ((b) << 16) | ((a) << 24)))
 #define VP_CONFIG_PATH "ux0:data/vitaplus/config.ini"
 
+static VpRommConfig romm_config;
+
 static void trim(char *value) {
     size_t length;
     char *start = value;
@@ -41,7 +43,6 @@ static void load_theme_file(VpApp *app, const char *path) {
 
 static void load_providers(VpApp *app) {
     FILE *file = fopen(VP_CONFIG_PATH, "r");
-    VpRommConfig romm = {0};
     VpHomebrewConfig homebrew = {0};
     VpFetchBackend fetch_backend = {vp_vita_fetch, NULL};
     char line[512];
@@ -54,8 +55,8 @@ static void load_providers(VpApp *app) {
         *equals++ = '\0';
         trim(line);
         trim(equals);
-        if (strcmp(line, "romm_url") == 0) (void)snprintf(romm.base_url, sizeof(romm.base_url), "%s", equals);
-        else if (strcmp(line, "romm_token") == 0) (void)snprintf(romm.token, sizeof(romm.token), "%s", equals);
+        if (strcmp(line, "romm_url") == 0) (void)snprintf(romm_config.base_url, sizeof(romm_config.base_url), "%s", equals);
+        else if (strcmp(line, "romm_token") == 0) (void)snprintf(romm_config.token, sizeof(romm_config.token), "%s", equals);
         else if (strcmp(line, "homebrew_catalog") == 0)
             (void)snprintf(homebrew.catalog_url, sizeof(homebrew.catalog_url), "%s", equals);
         else if (strcmp(line, "active_theme") == 0)
@@ -67,8 +68,8 @@ static void load_providers(VpApp *app) {
         (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/themes/%s/theme.ini", theme_id);
         load_theme_file(app, path);
     }
-    if (romm.base_url[0] != '\0' && romm.token[0] != '\0')
-        (void)vp_romm_sync(&app->catalog, &romm, fetch_backend);
+    if (romm_config.base_url[0] != '\0' && romm_config.token[0] != '\0')
+        (void)vp_romm_sync(&app->catalog, &romm_config, fetch_backend);
     if (homebrew.catalog_url[0] != '\0')
         (void)vp_homebrew_sync(&app->catalog, &homebrew, fetch_backend);
 }
@@ -94,14 +95,18 @@ static void download_selected(VpApp *app) {
             return;
         }
         (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/downloads/%s.vpk", destination);
-        (void)vp_install_homebrew(item, path, transfer_backend);
+        if (vp_install_homebrew(item, path, transfer_backend))
+            (void)snprintf(app->notice, sizeof(app->notice), "Instalacion finalizada; revisa LiveArea");
+        else
+            (void)snprintf(app->notice, sizeof(app->notice), "Falló la instalacion; revisa la red y el archivo");
         app->installation_armed = false;
-        (void)snprintf(app->notice, sizeof(app->notice), "Instalacion finalizada o fallida; revisa LiveArea");
     } else if (item->source == VP_SOURCE_ROMM) {
         char path[VP_PATH];
         (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/downloads/%s.rom", destination);
-        (void)vp_queue_download(item, path, transfer_backend);
-        (void)snprintf(app->notice, sizeof(app->notice), "Descarga enviada a %s", path);
+        if (vp_queue_download(item, &romm_config, path, transfer_backend))
+            (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada en %s", path);
+        else
+            (void)snprintf(app->notice, sizeof(app->notice), "Falló la descarga; revisa la red y el archivo");
     }
 }
 
