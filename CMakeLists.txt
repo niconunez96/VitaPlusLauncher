@@ -24,7 +24,8 @@ if(DEFINED ENV{VITASDK})
   vita_create_self(eboot.bin vitaplus UNSAFE)
   vita_create_vpk(vitaplus.vpk ${VITA_TITLEID} eboot.bin
     VERSION ${VITA_VERSION}
-    NAME ${VITA_APP_NAME})
+    NAME ${VITA_APP_NAME}
+    FILE ${CMAKE_CURRENT_SOURCE_DIR}/themes/default/theme.ini assets/default/theme.ini)
 else()
   message(STATUS "VITASDK not set: only vitaplus_core is configured")
 endif()
