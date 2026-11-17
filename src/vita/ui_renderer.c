@@ -19,6 +19,9 @@ static Asset assets[] = {
     {"platform_arcade",128,128,NULL,false}, {"platform_pce",128,128,NULL,false},
     {"platform_atari2600",128,128,NULL,false}, {"platform_wonderswan",128,128,NULL,false},
     {"platform_homebrew",128,128,NULL,false}, {"platform_generic",128,128,NULL,false},
+    {"platform_dreamcast",128,128,NULL,false}, {"platform_n3ds",128,128,NULL,false},
+    {"platform_gamecube",128,128,NULL,false}, {"platform_ps2",128,128,NULL,false},
+    {"platform_wii",128,128,NULL,false}, {"ui_romm",64,64,NULL,false},
     {"ui_library",64,64,NULL,false}, {"ui_home",64,64,NULL,false},
     {"ui_store",64,64,NULL,false}, {"ui_settings",64,64,NULL,false},
     {"ui_download",64,64,NULL,false}, {"ui_check",64,64,NULL,false},
@@ -31,7 +34,7 @@ static Asset assets[] = {
 static unsigned int bg, surface, ink, muted, accent;
 static int asset_budget;
 static float entrance;
-static float dock_x = 310;
+static float dock_x = 278;
 static unsigned long long last_frame;
 static unsigned long long focus_at;
 static char focus_key[VP_TEXT + 64];
@@ -117,18 +120,49 @@ static void icon(const char *name,float x,float y,float size) {
 /* Width-based UTF-8 truncation, rather than cutting arbitrary bytes mid-glyph. */
 static void label(vita2d_pgf *font,int x,int y,int width,float scale,unsigned int c,const char *value) {
     char text[VP_URL+4];
-    size_t n=strlen(value);
-    if (n>=sizeof(text)) n=sizeof(text)-1;
+    size_t length,n;
+    if (width<=0 || value==NULL) return;
+    /* Keep small PGF labels readable; truncate at the final drawing scale. */
+    scale=fmaxf(scale,.75f);
+    length=strlen(value); n=length;
+    if (n>sizeof(text)-4) n=sizeof(text)-4;
+    while (n>0 && ((unsigned char)value[n]&0xc0)==0x80) --n;
     memcpy(text,value,n); text[n]='\0';
-    if (vita2d_pgf_text_width(font,scale,text)>width) {
-        while (n>0) {
-            do { --n; } while (n>0 && ((unsigned char)text[n]&0xc0)==0x80);
+    if (n<length || vita2d_pgf_text_width(font,scale,text)>width) {
+        for (;;) {
             memcpy(text+n,"...",4);
             if (vita2d_pgf_text_width(font,scale,text)<=width) break;
+            if (n==0) { text[0]='\0'; break; }
+            do { --n; } while (n>0 && ((unsigned char)text[n]&0xc0)==0x80);
         }
     }
     vita2d_pgf_draw_text(font,x,y,c,scale,text);
 }
+
+static void two_line_label(vita2d_pgf *font,int x,int y,int width,unsigned int c,const char *value) {
+    char line[VP_URL+4];
+    const char *p=value,*split=NULL;
+    if (vita2d_pgf_text_width(font,.75f,value)<=width) { label(font,x,y,width,.75f,c,value); return; }
+    while ((p=strchr(p,' '))!=NULL) {
+        size_t n=(size_t)(p-value);
+        if (n>=sizeof(line)) break;
+        memcpy(line,value,n); line[n]='\0';
+        if (vita2d_pgf_text_width(font,.75f,line)>width) break;
+        split=p++;
+    }
+    if (!split) { label(font,x,y,width,.75f,c,value); return; }
+    memcpy(line,value,(size_t)(split-value)); line[split-value]='\0';
+    label(font,x,y,width,.75f,c,line);
+    while (*split==' ') ++split;
+    label(font,x,y+24,width,.75f,c,split);
+}
+
+#ifdef VP_UI_TESTING
+/* Probe the private renderer text boundary without exporting a production API. */
+void vp_ui_test_label(vita2d_pgf *font,int width,const char *value) {
+    label(font,0,24,width,.45f,0xffffffffu,value);
+}
+#endif
 
 static void card(float x,float y,float w,float h,bool selected,unsigned int tint) {
     int lift=selected ? (int)(4*entrance) : 0;
@@ -178,10 +212,10 @@ static void platforms(const VpUiFrame *f) {
         card(r.x,r.y,r.w,r.h,selected,tint);
         round_rect(r.x+12,r.y+12,74,78,14,mix(surface,tint,.23f));
         icon(p->asset,r.x+8,r.y+9-(selected?(int)(3*entrance):0),84);
-        label(f->font,r.x+96,r.y+42,108,.66f,ink,g->display);
+        two_line_label(f->font,r.x+96,r.y+32,108,ink,g->display);
         (void)snprintf(count,sizeof(count),"%u juegos",(unsigned)g->count);
-        label(f->font,r.x+96,r.y+67,108,.54f,muted,count);
-        round_rect(r.x+98,r.y+87,selected?54:22,3,1,tint);
+        label(f->font,r.x+96,r.y+88,108,.75f,muted,count);
+        round_rect(r.x+98,r.y+106,selected?54:22,3,1,tint);
     }
     pages(f,f->app->selected_platform,f->group_count,8);
 }
@@ -205,10 +239,10 @@ static void roms(const VpUiFrame *f) {
             card(r.x,r.y,r.w,r.h,f->visible[i]==f->app->selected_item,accent);
             if (f->covers[i-start]) fit(f->covers[i-start],r.x+8,r.y+8,74,104,0xffffffffu);
             else placeholder(item,r.x+10,r.y+12,70,96);
-            label(f->font,r.x+92,r.y+36,110,.61f,ink,item->title);
-            label(f->font,r.x+92,r.y+61,110,.49f,muted,item->platform_display);
-            badge(r.x+92,r.y+80,item);
-            if (item->favorite) icon("ui_star",r.x+166,r.y+80,25);
+            two_line_label(f->font,r.x+92,r.y+30,110,ink,item->title);
+            label(f->font,r.x+92,r.y+80,110,.75f,muted,item->platform_display);
+            badge(r.x+92,r.y+94,item);
+            if (item->favorite) icon("ui_star",r.x+166,r.y+94,25);
         }
         pages(f,pos,f->visible_count,8);
     } else if (f->app->active_view==VP_VIEW_LIST) {
@@ -261,7 +295,7 @@ static void empty(const VpUiFrame *f,const char *asset_name,const char *title,co
 
 static void settings(const VpUiFrame *f) {
     static const char *names[]={"RomM","Temas","Descargas"};
-    static const char *icons[]={"ui_sync","ui_settings","ui_download"};
+    static const char *icons[]={"ui_romm","ui_settings","ui_download"};
     int i;
     if (!f->settings_detail) {
         static const char *descriptions[]={"Conecta tu biblioteca y sincroniza caratulas","Tu espacio, tus colores","Progreso, errores y reintentos"};
@@ -285,22 +319,22 @@ static void settings(const VpUiFrame *f) {
         return;
     }
     if (f->settings_section==2) {
-        size_t start=(f->download_selection/5)*5,j;
+        size_t start=(f->download_selection/4)*4,j;
         if (!f->downloads->count) { empty(f,"ui_download","Todo al dia","Agrega un juego desde la biblioteca para descargarlo."); return; }
-        for (j=start;j<f->downloads->count && j<start+5;j++) {
+        for (j=start;j<f->downloads->count && j<start+4;j++) {
             const VpDownloadEntry *e=&f->downloads->entries[j];
-            int y=145+(int)(j-start)*52;
+            int y=145+(int)(j-start)*64;
             unsigned int state=e->state==VP_DOWNLOAD_FAILED?C(245,166,145,255):accent;
             char status[48];
-            round_rect(64,y,832,47,10,j==f->download_selection?mix(surface,state,.18f):surface);
+            round_rect(64,y,832,58,10,j==f->download_selection?mix(surface,state,.18f):surface);
             icon(e->state==VP_DOWNLOAD_COMPLETED?"ui_check":"ui_download",74,y+5,32);
-            label(f->font,120,y+20,480,.59f,ink,e->item.title);
+            label(f->font,120,y+24,480,.75f,ink,e->item.title);
             (void)snprintf(status,sizeof(status),"%s  %u%%",download_label(e->state),e->percent);
-            label(f->font,668,y+20,214,.5f,state,status);
-            if (e->state==VP_DOWNLOAD_FAILED) label(f->font,120,y+38,748,.45f,muted,e->error);
+            label(f->font,668,y+24,214,.75f,state,status);
+            if (e->state==VP_DOWNLOAD_FAILED) label(f->font,120,y+48,748,.75f,muted,e->error);
             else {
-                round_rect(120,y+32,752,4,2,alpha(ink,35));
-                if (e->percent) round_rect(120,y+32,fmaxf(4,752*fminf((float)e->percent,100)/100),4,2,state);
+                round_rect(120,y+42,752,4,2,alpha(ink,35));
+                if (e->percent) round_rect(120,y+42,fmaxf(4,752*fminf((float)e->percent,100)/100),4,2,state);
             }
         }
         label(f->font,64,430,832,.52f,muted,"X cancela pendiente/activa; X reintenta fallida/cancelada; Circulo vuelve");
@@ -326,16 +360,16 @@ static void footer(const VpUiFrame *f,float dt) {
     static const char *icons[]={"ui_library","ui_store","ui_settings"};
     static const char *names[]={"Biblioteca","Tiendas","Ajustes"};
     int i;
-    const char *hint="L / R  secciones    START  salir";
     round_rect(28,480,904,48,18,alpha(surface,245));
-    if (!appearance.motion_ms) dock_x=310+f->app->active_screen*134;
-    else dock_x+=(310+f->app->active_screen*134-dock_x)*fminf(1,dt*14);
-    round_rect(dock_x,485,130,38,13,mix(surface,accent,.16f));
-    label(f->font,46,509,255,.49f,muted,hint);
+    if (!appearance.motion_ms) dock_x=278+f->app->active_screen*156;
+    else dock_x+=(278+f->app->active_screen*156-dock_x)*fminf(1,dt*14);
+    round_rect(dock_x,485,152,38,13,mix(surface,accent,.16f));
+    label(f->font,46,499,216,.75f,muted,"L / R  secciones");
+    label(f->font,46,521,216,.75f,muted,"START  salir");
     for (i=0;i<3;i++) {
-        int x=310+i*134;
+        int x=278+i*156;
         icon(icons[i],x+7,489,30);
-        label(f->font,x+41,509,87,.57f,f->app->active_screen==(VpScreen)i?accent:muted,names[i]);
+        label(f->font,x+41,509,104,.75f,f->app->active_screen==(VpScreen)i?accent:muted,names[i]);
     }
     if (f->downloads->count) {
         char count[24];
@@ -375,10 +409,10 @@ void vp_ui_render(const VpUiFrame *f) {
         subtitle=f->settings_detail?"Ajustes / Configuracion":"Un espacio que se adapta a ti";
     } else subtitle="Nuevos mundos por descubrir";
     icon("emblem",25,20,35);
-    label(f->font,66,44,180,.64f,ink,"VitaPlus");
-    label(f->font,198,43,250,.43f,muted,"A U R O R A");
-    round_rect(773,25,159,28,12,alpha(surface,200));
-    label(f->font,787,44,132,.48f,f->busy?accent:muted,f->busy?"Sincronizando...":"Tu espacio de juego");
+    label(f->font,66,44,130,.8f,ink,"VitaPlus");
+    label(f->font,220,44,250,.75f,muted,"A U R O R A");
+    round_rect(700,25,232,28,12,alpha(surface,200));
+    label(f->font,714,44,204,.75f,f->busy?accent:muted,f->busy?"Sincronizando...":"Tu espacio de juego");
     label(f->font,28,94,720,1.05f,ink,title);
     label(f->font,29,121,770,.57f,muted,subtitle);
     if (f->app->active_screen==VP_SCREEN_LIBRARY) {
@@ -402,7 +436,7 @@ void vp_ui_render(const VpUiFrame *f) {
             label(f->font,66,441,538,.68f,ink,item->title);
             label(f->font,66,464,600,.49f,muted,item->description[0]?item->description:"Sin descripcion");
             label(f->font,685,440,247,.52f,accent,item->multi_file?"Varios archivos":(item->installed?"X jugar":"X descargar / instalar"));
-            label(f->font,685,463,247,.46f,muted,"Circulo volver  /  Cuadrado favorito");
+            label(f->font,685,463,247,.75f,muted,"O volver  /  [] favorito");
         }
     } else if (f->app->active_screen==VP_SCREEN_SETTINGS) settings(f);
     else {
@@ -421,7 +455,7 @@ void vp_ui_render(const VpUiFrame *f) {
             if (f->app->installation_armed) a=255;
             round_rect(106,414,748,58,15,alpha(mix(surface,bg,.6f),a));
             icon(f->app->installation_armed?"ui_key":"ui_sync",118,427,28);
-            label(f->font,156,447,677,.59f,alpha(ink,a),last_notice);
+            two_line_label(f->font,156,437,677,alpha(ink,a),last_notice);
         }
     }
 }

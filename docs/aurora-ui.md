@@ -7,14 +7,15 @@ their existing layers. The store remains a placeholder.
 ## Quick checks
 
 ```sh
-make test             # Portable core, platform aliases, geometry and theme defaults
-make test-assets      # Go tool, rejected-input preservation, 36 bundled PNGs
-make test-renderer    # Optional: Cairo + pkg-config; 11 read-only renderer scenarios
-./scripts/build-vpk.sh
+make test             # Core, aliases, selected VPK artwork, geometry, theme and lifecycle
+make test-assets      # Go converter and the original 36-image source inventory
+make test-renderer    # Cairo: 11 states, all 12 requested platforms, RomM and bounded text
+./scripts/build-vpk.sh --build-type Debug
 ```
 
 The headless renderer checks model immutability, empty states, all screens/views,
-last-page geometry, text bounds, missing-asset fallbacks and texture cleanup. Its
+last-page geometry, minimum .75 text scale, long ASCII/UTF-8 truncation, narrow text
+boxes, missing-asset fallbacks and texture cleanup. Its
 Cairo text approximates PGF and its texture tint is approximate: it is **not** proof
 of Vita GPU behavior, frame rate or font metrics. `build/test_renderer <existing-dir>`
 writes PNG previews outside the workspace if requested.
@@ -23,20 +24,43 @@ writes PNG previews outside the workspace if requested.
 
 | Group | Files | Runtime size |
 | --- | --- | --- |
-| Platform controllers/handhelds | 18 | 128×128 RGBA |
-| UI symbols | 16 | 64×64 RGBA |
+| Platform controllers/handhelds | 23 | 128×128 RGB/RGBA |
+| UI symbols, including official RomM | 17 | 64×64 RGB/RGBA |
 | Emblem | 1 | 128×128 RGBA |
 | Wallpaper | 1 | 480×272 RGB |
 
-`assets/aurora/provenance.tsv` records the FLUX model and request ID for every file.
-Prompts and originals can be recovered from those IDs through FLUX history. Signed
+`assets/aurora/provenance.tsv` records the original FLUX source inventory.
+`assets/controller-tiles/README.md` records the replacement artwork: square controller
+faces for Arcade, Dreamcast, GBA, Nintendo 3DS, Nintendo DS, GameCube, PS1, PS2, PSP,
+Genesis, SNES and Wii; sixteen modern system symbols; and the official circular RomM
+symbol. CMake selects these 29 sources while preserving the `assets/aurora/` paths
+inside the VPK; the remaining original artwork is unchanged. The runtime contains
+42 PNGs in total. RomM attribution, its original SVG and upstream license are included
+under `assets/licenses/`. Preview sheets and generation-account metadata are not bundled.
+
+For generated images, prompts and originals can be recovered from those IDs through FLUX history. Signed
 download URLs are deliberately not stored. These are original generated illustrations,
-not copied Cocoon assets or official manufacturer logos. The full set includes reserved
+not copied Cocoon assets or official manufacturer logos; the identified RomM symbol
+is the explicitly attributed exception. The full set includes reserved
 symbols such as search; a symbol does not introduce an unimplemented feature.
 
 Controllers share icons only for related slug aliases (for example `psx`/`playstation`,
 `genesis`/`mega-drive`/`megadrive`, and `gb`/`gbc`). Unknown slugs use the generic
 controller. Aliases affect presentation only, never launch matching or grouping.
+
+## Readable text on the native canvas
+
+The existing system PGF remains in use. Labels now have a minimum scale of `.75`,
+approximately 18px in the Cairo preview rather than the earlier 10–14px small labels.
+Native PGF metrics still require a physical-Vita check. Text is measured at its final
+scale and shortened only at UTF-8 boundaries, with space reserved for the ellipsis;
+boxes too narrow for an ellipsis draw empty text instead of overflowing.
+
+Platform and grid titles use up to two lines. The footer has wider navigation labels
+and two lines of help, while download rows reserve separate title/error baselines and
+show four entries per page. Long notices also use two lines. The palette, navigation,
+download actions, catalog records and GPU synchronization order are unchanged.
+The compact `O` and `[]` hints mean circle/back and square/favorite respectively.
 
 ## Prepare a replacement
 

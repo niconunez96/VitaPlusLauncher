@@ -66,7 +66,8 @@ En Ajustes, triángulo conserva la acción de canjear y guardar el código de Ro
 - Biblioteca con iconos de controles por consola, colores propios y foco animado.
 - Vistas de juegos `grid`, `list` y `carousel`, fondo con artwork y carátulas de RomM.
 - Dock de secciones, ajustes visuales, progreso de descargas y avisos temporales.
-- 36 PNG originales de FLUX incluidos; funcionan sin conexión y tienen fallback si falta un archivo.
+- 42 PNG incluidos: controles cuadrados para las 12 plataformas solicitadas, símbolos de sistema renovados y el círculo oficial de RomM; funcionan sin conexión y tienen fallback.
+- Texto con escala mínima de 0.75, títulos en dos líneas y más espacio en el dock y las descargas. Las pistas `O` y `[]` representan círculo y cuadrado.
 
 Los temas anteriores siguen usando sus cinco colores y su vista inicial. Las opciones
 adicionales son `ui_motion_ms` (0–600, 0 desactiva el movimiento), `ui_radius` (6–20)

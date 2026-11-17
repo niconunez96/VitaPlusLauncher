@@ -10,6 +10,7 @@ test: $(TEST) test-ui test-vita-lifecycle
 
 test-ui: build/test_presentation
 	build/test_presentation
+	python3 tests/test_ui_assets.py
 
 test-vita-lifecycle:
 	python3 tests/test_vita_render_lifecycle.py
@@ -27,7 +28,7 @@ test-renderer: build/test_renderer
 
 build/test_renderer: src/vita/ui_renderer.c src/vita/ui_renderer.h src/vita/ui_presentation.c src/vita/ui_presentation.h src/core/vitaplus.c tests/preview_renderer.c tests/ui_stubs/vita2d.h tests/ui_stubs/psp2/io/fcntl.h tests/ui_stubs/psp2/kernel/processmgr.h include/vitaplus.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -Isrc/vita -Itests/ui_stubs $$(pkg-config --cflags cairo) src/core/vitaplus.c src/vita/ui_presentation.c src/vita/ui_renderer.c tests/preview_renderer.c $$(pkg-config --libs cairo) -lm -o $@
+	$(CC) $(CFLAGS) -DVP_UI_TESTING -Isrc/vita -Itests/ui_stubs $$(pkg-config --cflags cairo) src/core/vitaplus.c src/vita/ui_presentation.c src/vita/ui_renderer.c tests/preview_renderer.c $$(pkg-config --libs cairo) -lm -o $@
 
 $(TEST): $(CORE) tests/test_core.c include/vitaplus.h
 	@mkdir -p build
