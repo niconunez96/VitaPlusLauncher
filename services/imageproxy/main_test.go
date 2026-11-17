@@ -67,6 +67,23 @@ func TestHealthReturnsOK(t *testing.T) {
 	}
 }
 
+func TestRootReturnsServiceGreeting(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Config{})
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if response.Body.String() != "imageproxy is running\n" {
+		t.Fatalf("body = %q, want %q", response.Body.String(), "imageproxy is running\n")
+	}
+}
+
 func TestImageLogsSuccessfulProcessing(t *testing.T) {
 	var logs bytes.Buffer
 	handler := NewHandler(Config{Logger: log.New(&logs, "", 0)})

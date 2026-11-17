@@ -13,6 +13,8 @@ go run .
 Optional `IMAGE_PROXY_ADDR` defaults to `:8090`.
 
 `GET /health` returns `200 OK` with `ok` and is intended for container health checks.
+`GET /` returns `200 OK` with `imageproxy is running`, which is useful for checking the
+public Dokploy domain before configuring VitaPlus.
 
 ## Deploy with Dokploy
 
