@@ -60,6 +60,7 @@ typedef struct {
 static VpBackgroundJob background_job = {
     .mutex = PTHREAD_MUTEX_INITIALIZER
 };
+#define VP_COVER_SLOTS 8
 static VpPlatformGroup platform_groups[VP_MAX_PLATFORMS];
 static size_t visible_indexes[VP_MAX_ITEMS];
 static size_t platform_group_count;
@@ -67,6 +68,25 @@ static size_t visible_count_cache;
 static VpLibraryLevel cached_library_level;
 static char cached_platform[VP_TEXT];
 static bool catalog_view_cache_dirty = true;
+static char unavailable_cover_ids[VP_COVER_SLOTS][VP_TEXT];
+
+static bool cover_is_unavailable(const char *id) {
+    size_t index;
+    for (index = 0; index < VP_COVER_SLOTS; index++) {
+        if (strcmp(unavailable_cover_ids[index], id) == 0) return true;
+    }
+    return false;
+}
+
+static void mark_cover_unavailable(const char *id) {
+    size_t index;
+    for (index = 0; index < VP_COVER_SLOTS; index++) {
+        if (unavailable_cover_ids[index][0] == '\0') {
+            (void)snprintf(unavailable_cover_ids[index], sizeof(unavailable_cover_ids[index]), "%s", id);
+            return;
+        }
+    }
+}
 
 static void trim(char *value) {
     size_t length;
@@ -315,6 +335,10 @@ static void background_job_poll(VpApp *app) {
     pthread_mutex_unlock(&background_job.mutex);
 
     if (!succeeded) {
+        if (kind == VP_JOB_FETCH_COVER) {
+            mark_cover_unavailable(item.id);
+            return;
+        }
         (void)snprintf(app->notice, sizeof(app->notice), "Operacion fallida: %.140s", error);
         return;
     }
@@ -440,8 +464,6 @@ typedef struct {
     bool attempted;
 } VpCoverSlot;
 
-#define VP_COVER_SLOTS 8
-
 static VpCoverSlot cover_slots[VP_COVER_SLOTS];
 static size_t cover_indexes[VP_COVER_SLOTS];
 
@@ -561,6 +583,7 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
         char thumbnail_url[VP_URL];
         FILE *file;
         if (!vp_libretro_thumbnail_url(item, thumbnail_url, sizeof(thumbnail_url))) continue;
+        if (cover_is_unavailable(item->id)) continue;
         if (find_cover_slot(item->id) != NULL) continue;
         thumbnail_item = *item;
         (void)snprintf(thumbnail_item.cover_url, sizeof(thumbnail_item.cover_url), "%s", thumbnail_url);
