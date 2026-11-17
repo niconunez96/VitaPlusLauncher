@@ -6,8 +6,9 @@
 #include <psp2/sysmodule.h>
 #include <vita2d.h>
 
+#include <curl/curl.h>
+
 #include <pthread.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,31 +21,6 @@
 #define VP_CATALOG_CACHE_PATH "ux0:data/vitaplus/catalog.cache"
 #define VP_CATALOG_CACHE_PARTIAL "ux0:data/vitaplus/catalog.cache.part"
 #define VP_CATALOG_CACHE_VERSION 1U
-#define VP_UI_FONT_PATH "app0:assets/fonts/NotoSans-Regular.ttf"
-
-static float ui_font_size(float legacy_scale) {
-    float size = legacy_scale * 23.0f;
-    return size < 14.0f ? 14.0f : size;
-}
-
-static void ui_font_draw_text(vita2d_font *font, int x, int y, unsigned int color,
-                              float legacy_scale, const char *text) {
-    vita2d_font_draw_text(font, x, y, color, ui_font_size(legacy_scale), text);
-}
-
-static void ui_font_draw_textf(vita2d_font *font, int x, int y, unsigned int color,
-                               float legacy_scale, const char *format, ...) {
-    va_list args;
-    char text[VP_TEXT];
-    va_start(args, format);
-    (void)vsnprintf(text, sizeof(text), format, args);
-    va_end(args);
-    ui_font_draw_text(font, x, y, color, legacy_scale, text);
-}
-
-#define vita2d_pgf_draw_text ui_font_draw_text
-#define vita2d_pgf_draw_textf ui_font_draw_textf
-
 static VpRommConfig romm_config;
 static VpHomebrewConfig homebrew_config;
 static VpLaunchConfig launch_config;
@@ -305,7 +281,7 @@ static void *background_job_run(void *context) {
     VpJobKind kind;
     VpRommConfig config;
     VpHomebrewConfig homebrew;
-    VpCatalog catalog;
+    const VpCatalog *catalog;
     VpItem item;
     char pair_code[VP_TEXT];
     char destination[VP_PATH];
@@ -319,7 +295,9 @@ static void *background_job_run(void *context) {
     kind = job->kind;
     config = job->romm;
     homebrew = job->homebrew;
-    catalog = job->catalog;
+    /* The job owns this snapshot until the worker is joined. Keep the full
+     * catalog off the worker stack, including for single-cover jobs. */
+    catalog = &job->catalog;
     item = job->item;
     (void)snprintf(destination, sizeof(destination), "%s", job->destination);
     (void)snprintf(partial, sizeof(partial), "%s", job->partial);
@@ -349,8 +327,8 @@ static void *background_job_run(void *context) {
         VpCoverTransformBackend cover_backend = {vp_vita_transform_cover, NULL};
         size_t index;
         succeeded = true;
-        for (index = 0; index < catalog.count; index++) {
-            const VpItem *cover = &catalog.items[index];
+        for (index = 0; index < catalog->count; index++) {
+            const VpItem *cover = &catalog->items[index];
             char destination[VP_PATH];
             char partial[VP_PATH + 8];
             bool transformed;
@@ -849,15 +827,17 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
         VpItem source_item;
         char path[VP_PATH];
         char partial[VP_PATH + 8];
-        FILE *file;
+        SceUID cover_fd;
         if (item->cover_url[0] == '\0') continue;
         if (cover_is_unavailable(item->id)) continue;
         if (find_cover_slot(item->id) != NULL) continue;
         source_item = *item;
         cover_path_for(item->id, path, sizeof(path));
-        file = fopen(path, "rb");
-        if (file != NULL) {
-            fclose(file);
+        /* A cache miss is expected on the first render. Probe through Vita I/O
+         * without opening a stdio stream just to check for existence. */
+        cover_fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+        if (cover_fd >= 0) {
+            sceIoClose(cover_fd);
             slot = acquire_slot(item->id, indexes, count);
             if (slot == NULL) return;
             slot->texture = load_texture_file(path);
@@ -924,7 +904,7 @@ static size_t visible_position(const size_t *visible, size_t count, size_t item_
 
 static void draw_download_badge(int x, int y, bool installed, unsigned int accent);
 
-static void draw_platforms(vita2d_font *font, const VpApp *app, size_t count,
+static void draw_platforms(vita2d_pgf *font, const VpApp *app, size_t count,
                            unsigned int surface, unsigned int text, unsigned int accent,
                            unsigned int muted) {
     size_t start = (app->selected_platform / 8) * 8;
@@ -950,7 +930,7 @@ static void draw_platforms(vita2d_font *font, const VpApp *app, size_t count,
     }
 }
 
-static void draw_rom_grid(vita2d_font *font, const VpApp *app, const size_t *visible, size_t count,
+static void draw_rom_grid(vita2d_pgf *font, const VpApp *app, const size_t *visible, size_t count,
                           unsigned int surface, unsigned int text, unsigned int accent,
                           unsigned int muted) {
     size_t position = visible_position(visible, count, app->selected_item);
@@ -976,7 +956,7 @@ static void draw_rom_grid(vita2d_font *font, const VpApp *app, const size_t *vis
     }
 }
 
-static void draw_list(vita2d_font *font, const VpApp *app, const size_t *visible, size_t count,
+static void draw_list(vita2d_pgf *font, const VpApp *app, const size_t *visible, size_t count,
                       unsigned int text, unsigned int accent) {
     size_t position = visible_position(visible, count, app->selected_item);
     size_t start = (position / 6) * 6;
@@ -992,7 +972,7 @@ static void draw_list(vita2d_font *font, const VpApp *app, const size_t *visible
     }
 }
 
-static void draw_carousel(vita2d_font *font, const VpApp *app, const size_t *visible, size_t count,
+static void draw_carousel(vita2d_pgf *font, const VpApp *app, const size_t *visible, size_t count,
                           unsigned int surface, unsigned int text, unsigned int accent) {
     size_t position = visible_position(visible, count, app->selected_item);
     size_t previous = (position + count - 1) % count;
@@ -1140,7 +1120,7 @@ static void refresh_download_queue_progress(void) {
     }
 }
 
-static void draw_shell(vita2d_font *font, VpApp *app) {
+static void draw_shell(vita2d_pgf *font, VpApp *app) {
     unsigned int background = theme_color(app->theme.background, RGBA(17, 20, 28, 255));
     unsigned int surface = theme_color(app->theme.surface, RGBA(32, 41, 56, 255));
     unsigned int accent = theme_color(app->theme.accent, RGBA(91, 192, 190, 255));
@@ -1336,11 +1316,15 @@ static void draw_shell(vita2d_font *font, VpApp *app) {
 int main(void) {
     SceCtrlData pad;
     unsigned int previous = 0;
-    vita2d_font *font;
+    vita2d_pgf *font;
+    bool curl_cleanup_allowed;
     vp_app_init(&app);
     vp_download_queue_init(&download_queue);
     vp_launch_config_init(&launch_config);
     if (setenv("OPENSSL_CONF", "app0:openssl.cnf", 1) != 0) return 1;
+    /* Initialize libcurl before creating any background worker. Letting the first
+     * cover-download thread initialize it lazily is unsafe on Vita's libcurl build. */
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return 1;
     (void)sceIoMkdir("ux0:data", 0777);
     (void)sceIoMkdir("ux0:data/vitaplus", 0777);
     (void)sceIoMkdir("ux0:data/vitaplus/cache", 0777);
@@ -1350,8 +1334,9 @@ int main(void) {
     if (load_catalog_cache(&app, &romm_config))
         (void)snprintf(app.notice, sizeof(app.notice), "Biblioteca cargada desde cache");
     refresh_downloaded_items(&app);
+    (void)sceSysmoduleLoadModule(SCE_SYSMODULE_PGF);
     vita2d_init();
-    font = vita2d_load_font_file(VP_UI_FONT_PATH);
+    font = vita2d_load_default_pgf();
     if (font == NULL) return 1;
     (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
@@ -1403,8 +1388,12 @@ int main(void) {
         vita2d_end_drawing();
         vita2d_swap_buffers();
     }
-    vita2d_free_font(font);
+    vita2d_free_pgf(font);
     vita2d_fini();
+    pthread_mutex_lock(&background_job.mutex);
+    curl_cleanup_allowed = !background_job.active;
+    pthread_mutex_unlock(&background_job.mutex);
+    if (curl_cleanup_allowed) curl_global_cleanup();
     sceKernelExitProcess(0);
     return 0;
 }

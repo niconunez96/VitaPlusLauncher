@@ -23,7 +23,9 @@ if(DEFINED ENV{VITASDK})
   add_executable(vitaplus
     src/vita/main.c
     src/vita/vita_backend.c)
-  target_link_libraries(vitaplus vitaplus_core vita2d freetype png jpeg curl zip z zstd bz2 lzma ssl crypto m pthread
+  # Catch large automatic buffers before they can exhaust a Vita thread stack.
+  target_compile_options(vitaplus PRIVATE -Werror=frame-larger-than=16384)
+  target_link_libraries(vitaplus vitaplus_core vita2d png jpeg curl zip z zstd bz2 lzma ssl crypto m pthread
     SceCtrl_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub SceCommonDialog_stub SceIme_stub
     ScePgf_stub SceIofilemgr_stub SceNet_stub SceNetCtl_stub SceSsl_stub SceSysmodule_stub
     ScePromoterUtil_stub_weak)
@@ -34,8 +36,6 @@ if(DEFINED ENV{VITASDK})
     VERSION ${VITA_VERSION}
      NAME ${VITA_APP_NAME}
      FILE ${CMAKE_CURRENT_SOURCE_DIR}/themes/default/theme.ini assets/default/theme.ini
-          ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/NotoSans-Regular.ttf assets/fonts/NotoSans-Regular.ttf
-          ${CMAKE_CURRENT_SOURCE_DIR}/assets/licenses/NotoSans-OFL-1.1.txt assets/licenses/NotoSans-OFL-1.1.txt
           ${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf openssl.cnf)
 else()
   message(STATUS "VITASDK not set: only vitaplus_core is configured")
