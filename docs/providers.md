@@ -13,9 +13,9 @@ GET {romm_url}/api/roms?limit=1&offset=<n>
 Authorization: Bearer <token>
 ```
 
-La respuesta debe incluir un `id` y `name`/`title`. Si están presentes, VitaPlus conserva `platform_slug`, `url_cover` y `download_url`; URLs relativas se convierten a absolutas contra `romm_url`.
+La respuesta debe incluir un `id` y `name`/`title`. Si están presentes, VitaPlus conserva `platform_slug`, `platform_display_name`, `summary` (con `description` como respaldo), la carátula y `download_url`; URLs relativas se convierten a absolutas contra `romm_url`. Para la carátula se prefiere `path_cover_small`, luego `path_cover_large`, luego `cover_url` y por último `url_cover`; RomM sirve esas rutas como PNG.
 
-La UI debe pedir confirmación antes de descargar y seleccionar una ruta de destino configurada por plataforma. El token debe tener sólo permisos de lectura/descarga requeridos por el cliente. VitaPlus lo envía como `Authorization: Bearer` para páginas de catálogo y recursos RomM del mismo origen; nunca lo adjunta a URLs externas de artwork o descargas. El catálogo se pagina de a un ítem para respetar el buffer fijo del core y se detiene al llegar a `total` o `VP_MAX_ITEMS`. Respuestas HTTP fuera de `2xx` hacen fallar el backend.
+La UI debe pedir confirmación antes de descargar y seleccionar una ruta de destino configurada por plataforma. El token debe tener sólo permisos de lectura/descarga requeridos por el cliente. VitaPlus lo envía como `Authorization: Bearer` para páginas de catálogo y recursos RomM del mismo origen; nunca lo adjunta a URLs externas de artwork o descargas. El catálogo se pagina de a un ítem para respetar el buffer fijo del core (`VP_FETCH_RESPONSE_SIZE`, 256 KiB) y se detiene al llegar a `total` o `VP_MAX_ITEMS`. Un objeto RomM individual ronda los 17-30 KiB con metadatos, por lo que el buffer debe conservar holgura; si una respuesta lo desborda, el backend reporta `Respuesta demasiado grande` (y `truncated=1` en `network.log`) en lugar del confuso error de escritura de libcurl. Respuestas HTTP fuera de `2xx` hacen fallar el backend.
 
 ## Homebrew
 

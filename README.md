@@ -7,7 +7,9 @@ VitaPlus es una shell/launcher homebrew para PS Vita/PSTV: reúne biblioteca loc
 ## Alcance
 
 - **Fase 1 — Shell:** inicio, biblioteca local, favoritos, recientes, vistas `grid`/`list`/`carousel` y temas `.ini`.
-- **Fase 2 — RomM:** proveedor basado en `GET /api/roms`, búsqueda, artwork remoto y cola de descargas.
+- **Fase 2 — RomM:** proveedor basado en `GET /api/roms`, búsqueda, artwork remoto, carátulas/fondo y cola de descargas.
+- **Biblioteca:** agrupada por consola (`nds`, `snes`, `psp`, …) con navegación por las cuatro flechas; al entrar a una consola se listan sólo sus ROMs con carátula, fondo y `summary`.
+- **Tiendas:** sección reservada; por ahora muestra sólo un placeholder `Proximamente`.
 - **Fase 3 — Homebrew:** catálogo estático compatible con NeoVitaDB/VitaHomebrewDB, búsqueda, detalle, descarga e instalación delegada de VPK.
 
 La tienda oficial de PlayStation queda como acceso delegado a la aplicación oficial: VitaPlus no reproduce, raspa ni automatiza compras/autenticación de Sony.
@@ -33,7 +35,15 @@ No necesita VitaSDK ni red real: las pruebas usan un backend de transferencia fa
 
 ## Compilar para Vita
 
-Instalar VitaSDK y dependencias `libvita2d`, `curl` y `zlib`; luego:
+Con Docker (recomendado, no hace falta instalar VitaSDK en el host):
+
+```sh
+./scripts/build-vpk.sh
+```
+
+El VPK queda en `dist/vitaplus.vpk`. Opciones: `--clean` borra el build anterior, `--build-type Debug` cambia el tipo de build y `--image <tag>` usa otra imagen de VitaSDK (`VITASDK_IMAGE` también sirve).
+
+Con VitaSDK local, instalar las dependencias `libvita2d`, `curl`, `zlib`, `libpng` y `libjpeg`; luego:
 
 ```sh
 cmake -S . -B build/vita -DCMAKE_TOOLCHAIN_FILE="$VITASDK/share/vita.toolchain.cmake"
@@ -48,6 +58,7 @@ El VPK queda en `build/vita/vitaplus.vpk`.
 ux0:data/vitaplus/config.ini
 ux0:data/vitaplus/themes/<tema>/theme.ini
 ux0:data/vitaplus/cache/
+ux0:data/vitaplus/cache/covers/
 ux0:data/vitaplus/downloads/
 ```
 

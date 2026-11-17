@@ -114,7 +114,10 @@ static bool sync_romm_catalog(VpApp *app) {
     for (index = 0; index < romm_catalog.count; index++) {
         if (vp_catalog_add(&app->catalog, &romm_catalog.items[index]) == NULL) return false;
     }
-    if (app->selected_item >= app->catalog.count) app->selected_item = 0;
+    app->library_level = VP_LEVEL_PLATFORMS;
+    app->active_platform[0] = '\0';
+    app->selected_platform = 0;
+    app->selected_item = 0;
     return true;
 }
 
@@ -201,19 +204,271 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
     }
 }
 
-static void download_selected(VpApp *app) {
-    VpItem *item;
-    VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
-    char destination[VP_TEXT];
+typedef struct {
+    char id[VP_TEXT];
+    vita2d_texture *texture;
+    bool attempted;
+} VpCoverSlot;
+
+#define VP_COVER_SLOTS 8
+
+static VpCoverSlot cover_slots[VP_COVER_SLOTS];
+static VpPlatformGroup platform_groups[VP_MAX_PLATFORMS];
+static size_t visible_indexes[VP_MAX_ITEMS];
+static size_t cover_indexes[VP_COVER_SLOTS];
+
+static void safe_id(const char *id, char *destination, size_t capacity) {
     size_t index;
-    if (app->catalog.count == 0) return;
-    item = &app->catalog.items[app->selected_item];
-    for (index = 0; item->id[index] != '\0' && index < sizeof(destination) - 1; index++) {
-        char value = item->id[index];
+    if (capacity == 0) return;
+    for (index = 0; id[index] != '\0' && index + 1 < capacity; index++) {
+        char value = id[index];
         destination[index] = ((value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
                               (value >= '0' && value <= '9') || value == '-' || value == '_') ? value : '_';
     }
     destination[index] = '\0';
+}
+
+static void cover_path_for(const char *id, char *path, size_t capacity) {
+    char safe[VP_TEXT];
+    safe_id(id, safe, sizeof(safe));
+    (void)snprintf(path, capacity, "ux0:data/vitaplus/cache/covers/%s.png", safe);
+}
+
+static VpCoverSlot *find_cover_slot(const char *id) {
+    size_t index;
+    if (id == NULL || id[0] == '\0') return NULL;
+    for (index = 0; index < VP_COVER_SLOTS; index++) {
+        if (cover_slots[index].id[0] != '\0' && strcmp(cover_slots[index].id, id) == 0)
+            return &cover_slots[index];
+    }
+    return NULL;
+}
+
+static vita2d_texture *cover_texture_for(const char *id) {
+    VpCoverSlot *slot = find_cover_slot(id);
+    return slot != NULL ? slot->texture : NULL;
+}
+
+static VpCoverSlot *acquire_slot(const char *id, const size_t *indexes, size_t count) {
+    size_t index;
+    size_t other;
+    VpCoverSlot *slot = NULL;
+    for (index = 0; index < VP_COVER_SLOTS; index++) {
+        if (cover_slots[index].id[0] == '\0') {
+            slot = &cover_slots[index];
+            break;
+        }
+    }
+    if (slot == NULL) {
+        for (index = 0; index < VP_COVER_SLOTS; index++) {
+            bool visible = false;
+            for (other = 0; other < count; other++) {
+                if (strcmp(cover_slots[index].id, app.catalog.items[indexes[other]].id) == 0) {
+                    visible = true;
+                    break;
+                }
+            }
+            if (!visible) {
+                slot = &cover_slots[index];
+                break;
+            }
+        }
+    }
+    if (slot == NULL) slot = &cover_slots[0];
+    if (slot->texture != NULL) vita2d_free_texture(slot->texture);
+    slot->texture = NULL;
+    slot->attempted = false;
+    (void)snprintf(slot->id, sizeof(slot->id), "%s", id);
+    return slot;
+}
+
+static vita2d_texture *load_texture_file(const char *path) {
+    FILE *file;
+    unsigned char magic[8];
+    size_t read_count;
+    file = fopen(path, "rb");
+    if (file == NULL) return NULL;
+    read_count = fread(magic, 1, sizeof(magic), file);
+    fclose(file);
+    if (read_count >= 8 && magic[0] == 0x89 && magic[1] == 'P' && magic[2] == 'N' && magic[3] == 'G')
+        return vita2d_load_PNG_file(path);
+    if (read_count >= 2 && magic[0] == 0xFF && magic[1] == 0xD8)
+        return vita2d_load_JPEG_file(path);
+    if (read_count >= 2 && magic[0] == 'B' && magic[1] == 'M')
+        return vita2d_load_BMP_file(path);
+    return NULL;
+}
+
+static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
+    VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
+    size_t index;
+    if (count > VP_COVER_SLOTS) count = VP_COVER_SLOTS;
+    for (index = 0; index < count; index++) {
+        const VpItem *item = &app->catalog.items[indexes[index]];
+        VpCoverSlot *slot;
+        char path[VP_PATH];
+        FILE *file;
+        if (item->cover_url[0] == '\0') continue;
+        if (find_cover_slot(item->id) != NULL) continue;
+        slot = acquire_slot(item->id, indexes, count);
+        if (slot == NULL) return;
+        cover_path_for(item->id, path, sizeof(path));
+        file = fopen(path, "rb");
+        if (file != NULL) {
+            fclose(file);
+        } else if (!vp_cache_cover(item, &romm_config, path, transfer_backend)) {
+            slot->attempted = true;
+            continue;
+        }
+        slot->texture = load_texture_file(path);
+        slot->attempted = true;
+        return;
+    }
+}
+
+static void draw_cover_fit(vita2d_texture *texture, int x, int y, int width, int height) {
+    int texture_width;
+    int texture_height;
+    float scale;
+    int draw_width;
+    int draw_height;
+    if (texture == NULL) return;
+    texture_width = vita2d_texture_get_width(texture);
+    texture_height = vita2d_texture_get_height(texture);
+    if (texture_width <= 0 || texture_height <= 0) return;
+    scale = (float)width / (float)texture_width;
+    if ((float)height / (float)texture_height < scale) scale = (float)height / (float)texture_height;
+    draw_width = (int)((float)texture_width * scale);
+    draw_height = (int)((float)texture_height * scale);
+    vita2d_draw_texture_scale(texture, (float)(x + (width - draw_width) / 2),
+                              (float)(y + (height - draw_height) / 2), scale, scale);
+}
+
+static void draw_background(vita2d_texture *texture, unsigned int background) {
+    vita2d_draw_rectangle(0, 0, 960, 544, background);
+    if (texture != NULL) {
+        int texture_width = vita2d_texture_get_width(texture);
+        int texture_height = vita2d_texture_get_height(texture);
+        float scale;
+        if (texture_width <= 0 || texture_height <= 0) return;
+        scale = 960.0f / (float)texture_width;
+        if (544.0f / (float)texture_height > scale) scale = 544.0f / (float)texture_height;
+        vita2d_draw_texture_tint_scale(texture, (float)((960 - (int)((float)texture_width * scale)) / 2),
+                                       (float)((544 - (int)((float)texture_height * scale)) / 2),
+                                       scale, scale, RGBA(80, 85, 100, 255));
+    }
+}
+
+static size_t platform_first_item(const VpCatalog *catalog, const char *platform) {
+    size_t index;
+    for (index = 0; index < catalog->count; index++) {
+        if (strcmp(catalog->items[index].platform, platform) == 0) return index;
+    }
+    return catalog->count;
+}
+
+static size_t visible_position(const size_t *visible, size_t count, size_t item_index) {
+    size_t index;
+    for (index = 0; index < count; index++) {
+        if (visible[index] == item_index) return index;
+    }
+    return 0;
+}
+
+static void draw_platforms(vita2d_pgf *font, const VpApp *app, size_t count,
+                           unsigned int surface, unsigned int text, unsigned int accent,
+                           unsigned int muted) {
+    size_t start = (app->selected_platform / 8) * 8;
+    size_t index;
+    for (index = start; index < count && index < start + 8; index++) {
+        size_t position = index - start;
+        int column = (int)position % 4;
+        int row = (int)position / 4;
+        int x = 28 + column * 232;
+        int y = 145 + row * 132;
+        const VpPlatformGroup *group = &platform_groups[index];
+        size_t item_index = platform_first_item(&app->catalog, group->platform);
+        vita2d_texture *texture = item_index < app->catalog.count
+                                      ? cover_texture_for(app->catalog.items[item_index].id)
+                                      : NULL;
+        unsigned int border = index == app->selected_platform ? accent : surface;
+        vita2d_draw_rectangle(x, y, 216, 120, border);
+        vita2d_draw_rectangle(x + 3, y + 3, 210, 114, surface);
+        if (texture != NULL) draw_cover_fit(texture, x + 8, y + 12, 72, 96);
+        else vita2d_draw_rectangle(x + 8, y + 12, 72, 96, muted);
+        vita2d_pgf_draw_textf(font, x + 90, y + 42, text, 0.62f, "%.15s", group->display);
+        vita2d_pgf_draw_textf(font, x + 90, y + 72, muted, 0.58f, "%u juegos", (unsigned)group->count);
+    }
+}
+
+static void draw_rom_grid(vita2d_pgf *font, const VpApp *app, const size_t *visible, size_t count,
+                          unsigned int surface, unsigned int text, unsigned int accent,
+                          unsigned int muted) {
+    size_t position = visible_position(visible, count, app->selected_item);
+    size_t start = (position / 8) * 8;
+    size_t index;
+    for (index = start; index < count && index < start + 8; index++) {
+        size_t slot = index - start;
+        int column = (int)slot % 4;
+        int row = (int)slot / 4;
+        int x = 28 + column * 232;
+        int y = 145 + row * 132;
+        const VpItem *item = &app->catalog.items[visible[index]];
+        vita2d_texture *texture = cover_texture_for(item->id);
+        unsigned int border = visible[index] == app->selected_item ? accent : surface;
+        vita2d_draw_rectangle(x, y, 216, 120, border);
+        vita2d_draw_rectangle(x + 3, y + 3, 210, 114, surface);
+        if (texture != NULL) draw_cover_fit(texture, x + 8, y + 12, 72, 96);
+        else vita2d_draw_rectangle(x + 8, y + 12, 72, 96, muted);
+        vita2d_pgf_draw_textf(font, x + 90, y + 38, text, 0.58f, "%.14s%s",
+                              item->favorite ? "* " : "", item->title);
+        vita2d_pgf_draw_textf(font, x + 90, y + 66, muted, 0.54f, "%.16s", item->platform_display);
+    }
+}
+
+static void draw_list(vita2d_pgf *font, const VpApp *app, const size_t *visible, size_t count,
+                      unsigned int text, unsigned int accent) {
+    size_t position = visible_position(visible, count, app->selected_item);
+    size_t start = (position / 6) * 6;
+    size_t index;
+    for (index = start; index < count && index < start + 6; index++) {
+        const VpItem *item = &app->catalog.items[visible[index]];
+        int y = 150 + (int)(index - start) * 38;
+        unsigned int color = visible[index] == app->selected_item ? accent : text;
+        vita2d_pgf_draw_textf(font, 42, y, color, 0.76f, "%c %s%s [%s]",
+                              visible[index] == app->selected_item ? '>' : ' ',
+                              item->favorite ? "* " : "", item->title, item->platform_display);
+    }
+}
+
+static void draw_carousel(vita2d_pgf *font, const VpApp *app, const size_t *visible, size_t count,
+                          unsigned int surface, unsigned int text, unsigned int accent) {
+    size_t position = visible_position(visible, count, app->selected_item);
+    size_t previous = (position + count - 1) % count;
+    size_t next = (position + 1) % count;
+    const VpItem *center = &app->catalog.items[visible[position]];
+    vita2d_texture *left = cover_texture_for(app->catalog.items[visible[previous]].id);
+    vita2d_texture *middle = cover_texture_for(center->id);
+    vita2d_texture *right = cover_texture_for(app->catalog.items[visible[next]].id);
+    vita2d_draw_rectangle(45, 180, 200, 180, surface);
+    vita2d_draw_rectangle(360, 135, 240, 270, accent);
+    vita2d_draw_rectangle(715, 180, 200, 180, surface);
+    if (left != NULL) draw_cover_fit(left, 55, 190, 180, 160);
+    if (middle != NULL) draw_cover_fit(middle, 370, 145, 220, 250);
+    if (right != NULL) draw_cover_fit(right, 725, 190, 180, 160);
+    vita2d_pgf_draw_textf(font, 62, 280, text, 0.62f, "%.12s", app->catalog.items[visible[previous]].title);
+    vita2d_pgf_draw_textf(font, 382, 420, text, 0.72f, "%.18s", center->title);
+    vita2d_pgf_draw_textf(font, 382, 445, surface, 0.58f, "%.18s", center->platform_display);
+    vita2d_pgf_draw_textf(font, 732, 280, text, 0.62f, "%.12s", app->catalog.items[visible[next]].title);
+}
+
+static void download_selected(VpApp *app) {
+    VpItem *item;
+    VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
+    char destination[VP_TEXT];
+    if (app->catalog.count == 0 || app->selected_item >= app->catalog.count) return;
+    item = &app->catalog.items[app->selected_item];
+    safe_id(item->id, destination, sizeof(destination));
     if (item->source == VP_SOURCE_HOMEBREW) {
         char path[VP_PATH];
         if (!app->installation_armed) {
@@ -225,7 +480,7 @@ static void download_selected(VpApp *app) {
         if (vp_install_homebrew(item, path, transfer_backend))
             (void)snprintf(app->notice, sizeof(app->notice), "Instalacion finalizada; revisa LiveArea");
         else
-            (void)snprintf(app->notice, sizeof(app->notice), "Falló la instalacion; revisa la red y el archivo");
+            (void)snprintf(app->notice, sizeof(app->notice), "Fallo la instalacion; revisa la red y el archivo");
         app->installation_armed = false;
     } else if (item->source == VP_SOURCE_ROMM) {
         char path[VP_PATH];
@@ -233,67 +488,75 @@ static void download_selected(VpApp *app) {
         if (vp_queue_download(item, &romm_config, path, transfer_backend))
             (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada en %.160s", path);
         else
-            (void)snprintf(app->notice, sizeof(app->notice), "Falló la descarga; revisa la red y el archivo");
+            (void)snprintf(app->notice, sizeof(app->notice), "Fallo la descarga; revisa la red y el archivo");
     }
 }
 
-static void draw_list(vita2d_pgf *font, const VpApp *app, unsigned int text, unsigned int accent) {
-    size_t start = (app->selected_item / 6) * 6;
-    size_t index;
-    for (index = start; index < app->catalog.count && index < start + 6; index++) {
-        const VpItem *item = &app->catalog.items[index];
-        int y = 150 + (int)(index - start) * 34;
-        unsigned int color = (index == app->selected_item) ? accent : text;
-        vita2d_pgf_draw_textf(font, 42, y, color, 0.82f, "%c %s%s [%s]",
-                              (index == app->selected_item) ? '>' : ' ',
-                              item->favorite ? "* " : "", item->title, item->platform);
-    }
-}
-
-static void draw_grid(vita2d_pgf *font, const VpApp *app, unsigned int surface, unsigned int text, unsigned int accent) {
-    size_t start = (app->selected_item / 6) * 6;
-    size_t index;
-    for (index = start; index < app->catalog.count && index < start + 6; index++) {
-        const VpItem *item = &app->catalog.items[index];
-        int column = (int)(index - start) % 3;
-        int row = (int)(index - start) / 3;
-        int x = 34 + column * 302;
-        int y = 145 + row * 142;
-        unsigned int border = (index == app->selected_item) ? accent : surface;
-        vita2d_draw_rectangle(x, y, 278, 120, border);
-        vita2d_draw_rectangle(x + 3, y + 3, 272, 114, surface);
-        vita2d_pgf_draw_text(font, x + 12, y + 38, text, 0.78f, item->title);
-        vita2d_pgf_draw_textf(font, x + 12, y + 72, accent, 0.66f, "%s · %s", item->platform, vp_source_name(item->source));
-    }
-}
-
-static void draw_carousel(vita2d_pgf *font, const VpApp *app, unsigned int surface, unsigned int text, unsigned int accent) {
-    size_t count = app->catalog.count;
-    size_t previous = (app->selected_item + count - 1) % count;
-    size_t next = (app->selected_item + 1) % count;
-    vita2d_draw_rectangle(45, 180, 200, 180, surface);
-    vita2d_draw_rectangle(360, 135, 240, 270, accent);
-    vita2d_draw_rectangle(715, 180, 200, 180, surface);
-    vita2d_pgf_draw_text(font, 62, 280, text, 0.72f, app->catalog.items[previous].title);
-    vita2d_pgf_draw_text(font, 382, 265, text, 0.95f, app->catalog.items[app->selected_item].title);
-    vita2d_pgf_draw_textf(font, 382, 305, surface, 0.72f, "%s", app->catalog.items[app->selected_item].platform);
-    vita2d_pgf_draw_text(font, 732, 280, text, 0.72f, app->catalog.items[next].title);
-}
-
-static void draw_shell(vita2d_pgf *font, const VpApp *app) {
-    const VpItem *selected;
+static void draw_shell(vita2d_pgf *font, VpApp *app) {
     unsigned int background = theme_color(app->theme.background, RGBA(17, 20, 28, 255));
     unsigned int surface = theme_color(app->theme.surface, RGBA(32, 41, 56, 255));
     unsigned int accent = theme_color(app->theme.accent, RGBA(91, 192, 190, 255));
     unsigned int text = theme_color(app->theme.text, RGBA(238, 242, 246, 255));
     unsigned int muted = theme_color(app->theme.muted, RGBA(156, 169, 184, 255));
+    size_t group_count = 0;
+    size_t visible_count = 0;
+    size_t cover_count = 0;
+    const VpItem *selected = NULL;
+    const VpPlatformGroup *selected_group = NULL;
+    vita2d_texture *background_texture = NULL;
+    size_t index;
+
+    if (app->active_screen == VP_SCREEN_LIBRARY) {
+        if (app->library_level == VP_LEVEL_PLATFORMS) {
+            size_t start;
+            group_count = vp_catalog_platforms(&app->catalog, platform_groups, VP_MAX_PLATFORMS);
+            if (group_count > 0 && app->selected_platform >= group_count)
+                app->selected_platform = group_count - 1;
+            start = (app->selected_platform / 8) * 8;
+            for (index = start; index < group_count && index < start + 8; index++) {
+                size_t item_index = platform_first_item(&app->catalog, platform_groups[index].platform);
+                if (item_index < app->catalog.count && cover_count < VP_COVER_SLOTS)
+                    cover_indexes[cover_count++] = item_index;
+            }
+            if (group_count > 0) {
+                size_t item_index = platform_first_item(&app->catalog,
+                                                        platform_groups[app->selected_platform].platform);
+                selected_group = &platform_groups[app->selected_platform];
+                if (item_index < app->catalog.count)
+                    background_texture = cover_texture_for(app->catalog.items[item_index].id);
+            }
+        } else {
+            size_t page_size = app->active_view == VP_VIEW_GRID ? 8 : (app->active_view == VP_VIEW_LIST ? 6 : 3);
+            size_t position;
+            size_t start;
+            visible_count = vp_app_visible(app, visible_indexes, VP_MAX_ITEMS);
+            position = visible_position(visible_indexes, visible_count, app->selected_item);
+            start = (position / page_size) * page_size;
+            for (index = start; index < visible_count && index < start + page_size; index++)
+                cover_indexes[cover_count++] = visible_indexes[index];
+            if (visible_count > 0) {
+                selected = &app->catalog.items[app->selected_item];
+                background_texture = cover_texture_for(selected->id);
+            }
+        }
+        covers_step(app, cover_indexes, cover_count);
+        if (background_texture == NULL && selected != NULL)
+            background_texture = cover_texture_for(selected->id);
+        if (background_texture == NULL && selected_group != NULL) {
+            size_t item_index = platform_first_item(&app->catalog, selected_group->platform);
+            if (item_index < app->catalog.count)
+                background_texture = cover_texture_for(app->catalog.items[item_index].id);
+        }
+    }
+
     vita2d_clear_screen();
-    vita2d_draw_rectangle(0, 0, 960, 544, background);
+    draw_background(background_texture, background);
     vita2d_pgf_draw_text(font, 28, 42, text, 1.0f, "VitaPlus");
-    vita2d_pgf_draw_text(font, 28, 70, muted, 0.62f,
-                         "X descarga/instala | L/R secciones | Arriba/Abajo selecciona | Triangulo vista | Cuadrado favorito | Start salir");
+    vita2d_pgf_draw_text(font, 28, 70, muted, 0.58f,
+                         "Flechas navega | X abre/descarga | Circulo vuelve | L/R secciones | Triangulo vista | Cuadrado favorito | Start salir");
     vita2d_pgf_draw_text(font, 28, 112, accent, 1.0f, vp_screen_name(app->active_screen));
     vita2d_pgf_draw_text(font, 734, 112, muted, 0.8f, vp_view_name(app->active_view));
+
     if (app->active_screen == VP_SCREEN_SETTINGS) {
         if (!settings_detail_active) {
             vita2d_pgf_draw_textf(font, 42, 185, settings_section == 0 ? accent : text, 0.82f,
@@ -329,20 +592,49 @@ static void draw_shell(vita2d_pgf *font, const VpApp *app) {
         }
         return;
     }
-    if (app->catalog.count == 0) {
-        vita2d_pgf_draw_text(font, 28, 160, text, 0.85f,
-                             "Sin catalogo. Configura RomM o una tienda homebrew en ux0:data/vitaplus/config.ini");
+
+    if (app->active_screen == VP_SCREEN_STORES) {
+        vita2d_pgf_draw_text(font, 28, 200, text, 0.9f, "Proximamente");
+        vita2d_pgf_draw_text(font, 28, 240, muted, 0.66f, "Estamos preparando las tiendas para una proxima version.");
         return;
     }
-    if (app->active_view == VP_VIEW_GRID) draw_grid(font, app, surface, text, accent);
-    else if (app->active_view == VP_VIEW_CAROUSEL) draw_carousel(font, app, surface, text, accent);
-    else draw_list(font, app, text, accent);
-    selected = &app->catalog.items[app->selected_item];
+
+    if (app->library_level == VP_LEVEL_PLATFORMS) {
+        if (group_count == 0) {
+            vita2d_pgf_draw_text(font, 28, 160, text, 0.85f,
+                                 "Sin catalogo. Configura RomM o una tienda homebrew en ux0:data/vitaplus/config.ini");
+            return;
+        }
+        draw_platforms(font, app, group_count, surface, text, accent, muted);
+        vita2d_draw_rectangle(28, 425, 904, 105, surface);
+        vita2d_pgf_draw_text(font, 48, 455, text, 0.88f, selected_group->display);
+        vita2d_pgf_draw_textf(font, 48, 482, muted, 0.68f, "%u juegos en esta consola",
+                              (unsigned)selected_group->count);
+        vita2d_pgf_draw_text(font, 48, 510, muted, 0.62f,
+                             "X abre la lista de ROMs | Flechas cambian de consola");
+        if (app->notice[0] != '\0')
+            vita2d_pgf_draw_text(font, 48, 532, RGBA(245, 174, 79, 255), 0.56f, app->notice);
+        return;
+    }
+
+    if (visible_count == 0) {
+        vita2d_pgf_draw_text(font, 28, 160, text, 0.85f, "Esta consola no tiene ROMs en el catalogo");
+        return;
+    }
+    if (app->active_view == VP_VIEW_GRID) draw_rom_grid(font, app, visible_indexes, visible_count, surface, text, accent, muted);
+    else if (app->active_view == VP_VIEW_CAROUSEL) draw_carousel(font, app, visible_indexes, visible_count, surface, text, accent);
+    else draw_list(font, app, visible_indexes, visible_count, text, accent);
+
     vita2d_draw_rectangle(28, 425, 904, 105, surface);
-    vita2d_pgf_draw_text(font, 48, 455, text, 0.88f, selected->title);
-    vita2d_pgf_draw_textf(font, 48, 482, muted, 0.68f, "%s · %s · %s", selected->platform,
+    vita2d_pgf_draw_textf(font, 48, 455, text, 0.82f, "%.70s", selected->title);
+    vita2d_pgf_draw_textf(font, 48, 482, muted, 0.62f, "%s | %s | %s", selected->platform_display,
                           vp_source_name(selected->source), selected->installed ? "Instalado" : "Remoto");
-    if (app->notice[0] != '\0') vita2d_pgf_draw_text(font, 48, 512, RGBA(245, 174, 79, 255), 0.62f, app->notice);
+    if (app->notice[0] != '\0')
+        vita2d_pgf_draw_text(font, 48, 510, RGBA(245, 174, 79, 255), 0.58f, app->notice);
+    else if (selected->description[0] != '\0')
+        vita2d_pgf_draw_textf(font, 48, 510, muted, 0.56f, "%.120s", selected->description);
+    else
+        vita2d_pgf_draw_text(font, 48, 510, muted, 0.56f, "Sin descripcion");
 }
 
 int main(void) {
@@ -355,6 +647,10 @@ int main(void) {
     vita2d_init();
     font = vita2d_load_default_pgf();
     (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
+    (void)sceIoMkdir("ux0:data", 0777);
+    (void)sceIoMkdir("ux0:data/vitaplus", 0777);
+    (void)sceIoMkdir("ux0:data/vitaplus/cache", 0777);
+    (void)sceIoMkdir("ux0:data/vitaplus/cache/covers", 0777);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
     for (;;) {
         unsigned int pressed;
@@ -379,11 +675,24 @@ int main(void) {
         } else {
             if (pressed & SCE_CTRL_LTRIGGER) vp_app_cycle_screen(&app, -1);
             if (pressed & SCE_CTRL_RTRIGGER) vp_app_cycle_screen(&app, 1);
-            if (pressed & SCE_CTRL_UP) vp_app_select(&app, -1);
-            if (pressed & SCE_CTRL_DOWN) vp_app_select(&app, 1);
-            if (pressed & SCE_CTRL_TRIANGLE) vp_app_cycle_view(&app);
-            if ((pressed & SCE_CTRL_SQUARE) && app.catalog.count > 0) vp_item_toggle_favorite(&app.catalog.items[app.selected_item]);
-            if (pressed & SCE_CTRL_CROSS) download_selected(&app);
+            if (app.active_screen == VP_SCREEN_LIBRARY) {
+                int columns = app.library_level == VP_LEVEL_PLATFORMS
+                                  ? 4
+                                  : (app.active_view == VP_VIEW_GRID ? 4 : (app.active_view == VP_VIEW_LIST ? 1 : 3));
+                if (pressed & SCE_CTRL_UP) vp_app_move(&app, 0, -1, columns);
+                if (pressed & SCE_CTRL_DOWN) vp_app_move(&app, 0, 1, columns);
+                if (pressed & SCE_CTRL_LEFT) vp_app_move(&app, -1, 0, columns);
+                if (pressed & SCE_CTRL_RIGHT) vp_app_move(&app, 1, 0, columns);
+                if (pressed & SCE_CTRL_TRIANGLE) vp_app_cycle_view(&app);
+                if ((pressed & SCE_CTRL_SQUARE) && app.library_level == VP_LEVEL_ROMS &&
+                    app.selected_item < app.catalog.count)
+                    vp_item_toggle_favorite(&app.catalog.items[app.selected_item]);
+                if (pressed & SCE_CTRL_CIRCLE) vp_app_back(&app);
+                if (pressed & SCE_CTRL_CROSS) {
+                    if (app.library_level == VP_LEVEL_PLATFORMS) vp_app_open(&app);
+                    else download_selected(&app);
+                }
+            }
         }
         vita2d_start_drawing();
         draw_shell(font, &app);

@@ -21,6 +21,7 @@ typedef struct {
     char *buffer;
     size_t capacity;
     size_t used;
+    bool truncated;
 } ResponseBuffer;
 
 typedef struct {
@@ -35,9 +36,13 @@ const char *vp_vita_last_error(void) {
     return last_error[0] != '\0' ? last_error : "sin detalle";
 }
 
-static void set_last_error(CURLcode result, long status, const char *response) {
+static void set_last_error(CURLcode result, long status, const char *response, bool truncated) {
     const char *message;
-    if (result != CURLE_OK) {
+    if (truncated) {
+        (void)snprintf(last_error, sizeof(last_error),
+                       "Respuesta demasiado grande (%u KiB); revisa network.log",
+                       (unsigned)(VP_FETCH_RESPONSE_SIZE / 1024));
+    } else if (result != CURLE_OK) {
         (void)snprintf(last_error, sizeof(last_error), "Red: %s", curl_easy_strerror(result));
     } else if (status == 422 && response != NULL &&
                (message = strstr(response, "\"msg\":\"")) != NULL) {
@@ -50,16 +55,17 @@ static void set_last_error(CURLcode result, long status, const char *response) {
     }
 }
 
-static void record_http_failure(const char *url, CURLcode result, long status, const char *response) {
+static void record_http_failure(const char *url, CURLcode result, long status, const char *response,
+                                bool truncated) {
     FILE *log;
     if (result == CURLE_OK && status >= 200 && status < 300) return;
     (void)sceIoMkdir("ux0:data", 0777);
     (void)sceIoMkdir("ux0:data/vitaplus", 0777);
     log = fopen("ux0:data/vitaplus/network.log", "a");
     if (log == NULL) return;
-    (void)fprintf(log, "url=%s\ncurl=%d (%s)\nhttp=%ld\nbody=%.1024s\n---\n",
+    (void)fprintf(log, "url=%s\ncurl=%d (%s)\nhttp=%ld\ntruncated=%d\nbody=%.1024s\n---\n",
                   url != NULL ? url : "(null)", (int)result, curl_easy_strerror(result), status,
-                  response != NULL ? response : "");
+                  truncated ? 1 : 0, response != NULL ? response : "");
     fclose(log);
 }
 
@@ -79,7 +85,13 @@ static bool valid_pair_code(const char *code) {
 static size_t response_write(char *data, size_t size, size_t count, void *context) {
     ResponseBuffer *buffer = context;
     size_t bytes = size * count;
-    if (bytes == 0 || buffer->used + bytes + 1 > buffer->capacity) return 0;
+    if (bytes == 0) return 0;
+    if (buffer->used + bytes + 1 > buffer->capacity) {
+        /* Returning a short count makes libcurl report CURLE_WRITE_ERROR, whose text talks
+         * about writing to disk. Flag the real cause so the UI does not blame the network. */
+        buffer->truncated = true;
+        return 0;
+    }
     memcpy(buffer->buffer + buffer->used, data, bytes);
     buffer->used += bytes;
     buffer->buffer[buffer->used] = '\0';
@@ -213,6 +225,7 @@ bool vp_vita_fetch(const char *url, const char *bearer_token,
     buffer.buffer = response;
     buffer.capacity = response_capacity;
     buffer.used = 0;
+    buffer.truncated = false;
     curl = curl_easy_init();
     if (curl == NULL) return false;
     if (bearer_token != NULL && bearer_token[0] != '\0') {
@@ -235,8 +248,8 @@ bool vp_vita_fetch(const char *url, const char *bearer_token,
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     result = curl_easy_perform(curl);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-    set_last_error(result, status, response);
-    record_http_failure(url, result, status, response);
+    set_last_error(result, status, response, buffer.truncated);
+    record_http_failure(url, result, status, response, buffer.truncated);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     return result == CURLE_OK && status >= 200 && status < 300 && buffer.used > 0;
@@ -257,6 +270,7 @@ bool vp_vita_exchange_pair_code(const char *url, const char *code,
     buffer.buffer = response;
     buffer.capacity = response_capacity;
     buffer.used = 0;
+    buffer.truncated = false;
     curl = curl_easy_init();
     if (curl == NULL) return false;
     headers = curl_slist_append(headers, "Content-Type: application/json");

@@ -6,8 +6,24 @@
 #include <string.h>
 
 /* The Vita frontend is single-threaded; keeping the remote payload off its small stack avoids
- * a startup crash when providers are configured. */
-static char vp_fetch_response[32768];
+ * a startup crash when providers are configured. One RomM ROM object can exceed 30 KiB, so the
+ * buffer is sized for a single metadata-heavy page instead of the bare minimum. */
+static char vp_fetch_response[VP_FETCH_RESPONSE_SIZE];
+/* The Vita frontend is single-threaded; keeping these scratch buffers off its small stack
+ * avoids a startup crash while grouping a large catalog. */
+static size_t vp_visible_scratch[VP_MAX_ITEMS];
+static VpPlatformGroup vp_platform_scratch[VP_MAX_PLATFORMS];
+
+static int vp_compare_ci(const char *a, const char *b) {
+    while (*a != '\0' && *b != '\0') {
+        int left = tolower((unsigned char)*a);
+        int right = tolower((unsigned char)*b);
+        if (left != right) return left - right;
+        a++;
+        b++;
+    }
+    return tolower((unsigned char)*a) - tolower((unsigned char)*b);
+}
 
 static void vp_copy(char *destination, size_t capacity, const char *source) {
     if (capacity == 0) return;
@@ -135,6 +151,95 @@ size_t vp_catalog_search(const VpCatalog *catalog, const char *query,
     return found;
 }
 
+static int vp_compare_item(const VpItem *a, const VpItem *b) {
+    int result = vp_compare_ci(a->title, b->title);
+    if (result != 0) return result;
+    return strcmp(a->id, b->id);
+}
+
+static size_t vp_platform_count(const VpCatalog *catalog) {
+    size_t count = 0;
+    size_t index;
+    if (catalog == NULL) return 0;
+    for (index = 0; index < catalog->count; index++) {
+        const char *platform = catalog->items[index].platform;
+        size_t previous;
+        bool seen = false;
+        if (platform[0] == '\0') continue;
+        for (previous = 0; previous < index; previous++) {
+            if (strcmp(catalog->items[previous].platform, platform) == 0) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) count++;
+    }
+    return count;
+}
+
+size_t vp_catalog_platforms(const VpCatalog *catalog, VpPlatformGroup *groups, size_t capacity) {
+    size_t index;
+    size_t found = 0;
+    if (catalog == NULL || groups == NULL || capacity == 0) return 0;
+    for (index = 0; index < catalog->count; index++) {
+        const VpItem *item = &catalog->items[index];
+        size_t cursor;
+        size_t insertion;
+        if (item->platform[0] == '\0') continue;
+        for (cursor = 0; cursor < found; cursor++) {
+            if (strcmp(groups[cursor].platform, item->platform) == 0) break;
+        }
+        if (cursor < found) {
+            groups[cursor].count++;
+            if (groups[cursor].display[0] == '\0' ||
+                strcmp(groups[cursor].display, groups[cursor].platform) == 0) {
+                if (item->platform_display[0] != '\0')
+                    vp_copy(groups[cursor].display, sizeof(groups[cursor].display),
+                            item->platform_display);
+            }
+            continue;
+        }
+        if (found >= capacity) continue;
+        memset(&groups[found], 0, sizeof(groups[found]));
+        vp_copy(groups[found].platform, sizeof(groups[found].platform), item->platform);
+        vp_copy(groups[found].display, sizeof(groups[found].display),
+                item->platform_display[0] != '\0' ? item->platform_display : item->platform);
+        groups[found].count = 1;
+        insertion = found;
+        while (insertion > 0 &&
+               vp_compare_ci(groups[insertion - 1].display, groups[insertion].display) > 0) {
+            VpPlatformGroup temp = groups[insertion - 1];
+            groups[insertion - 1] = groups[insertion];
+            groups[insertion] = temp;
+            insertion--;
+        }
+        found++;
+    }
+    return found;
+}
+
+size_t vp_catalog_platform_items(const VpCatalog *catalog, const char *platform,
+                                 size_t *indexes, size_t capacity) {
+    size_t index;
+    size_t found = 0;
+    if (catalog == NULL || platform == NULL || indexes == NULL || capacity == 0) return 0;
+    for (index = 0; index < catalog->count; index++) {
+        size_t insertion;
+        if (strcmp(catalog->items[index].platform, platform) != 0) continue;
+        if (found >= capacity) continue;
+        insertion = found;
+        while (insertion > 0 &&
+               vp_compare_item(&catalog->items[indexes[insertion - 1]],
+                               &catalog->items[index]) > 0) {
+            indexes[insertion] = indexes[insertion - 1];
+            insertion--;
+        }
+        indexes[insertion] = index;
+        found++;
+    }
+    return found;
+}
+
 size_t vp_catalog_recent(const VpCatalog *catalog, size_t *indexes, size_t capacity) {
     size_t index;
     size_t found = 0;
@@ -199,6 +304,9 @@ void vp_app_init(VpApp *app) {
     app->theme.card_height = 216;
     app->active_view = VP_VIEW_GRID;
     app->active_screen = VP_SCREEN_LIBRARY;
+    app->library_level = VP_LEVEL_PLATFORMS;
+    app->active_platform[0] = '\0';
+    app->selected_platform = 0;
     app->selected_item = 0;
 }
 
@@ -225,9 +333,45 @@ void vp_app_cycle_view(VpApp *app) {
     app->active_view = (VpView)(((int)app->active_view + 1) % 3);
 }
 
+static size_t vp_wrap_add(size_t position, long delta, size_t count) {
+    long value;
+    if (count == 0) return 0;
+    value = (long)position + delta;
+    while (value < 0) value += (long)count;
+    return (size_t)value % count;
+}
+
+size_t vp_app_visible(VpApp *app, size_t *indexes, size_t capacity) {
+    size_t count;
+    size_t cursor;
+    if (app == NULL || indexes == NULL) return 0;
+    if (app->library_level != VP_LEVEL_ROMS) return 0;
+    count = vp_catalog_platform_items(&app->catalog, app->active_platform, indexes, capacity);
+    if (count == 0) {
+        app->selected_item = 0;
+        return 0;
+    }
+    for (cursor = 0; cursor < count; cursor++) {
+        if (indexes[cursor] == app->selected_item) return count;
+    }
+    app->selected_item = indexes[0];
+    return count;
+}
+
 void vp_app_select(VpApp *app, int direction) {
     size_t count;
     if (app == NULL || direction == 0) return;
+    if (app->library_level == VP_LEVEL_PLATFORMS) {
+        count = vp_platform_count(&app->catalog);
+        if (count == 0) {
+            app->selected_platform = 0;
+            return;
+        }
+        if (direction > 0) app->selected_platform = (app->selected_platform + 1) % count;
+        else app->selected_platform = (app->selected_platform + count - 1) % count;
+        app->installation_armed = false;
+        return;
+    }
     count = app->catalog.count;
     if (count == 0) {
         app->selected_item = 0;
@@ -235,6 +379,95 @@ void vp_app_select(VpApp *app, int direction) {
     }
     if (direction > 0) app->selected_item = (app->selected_item + 1) % count;
     else app->selected_item = (app->selected_item + count - 1) % count;
+    app->installation_armed = false;
+}
+
+static void vp_move_platforms(VpApp *app, int dx, int dy, int columns) {
+    size_t count = vp_platform_count(&app->catalog);
+    size_t rows;
+    size_t row;
+    size_t column;
+    size_t target;
+    if (count == 0) {
+        app->selected_platform = 0;
+        return;
+    }
+    if (app->selected_platform >= count) app->selected_platform = count - 1;
+    if (columns < 1) columns = 1;
+    rows = (count + (size_t)columns - 1) / (size_t)columns;
+    if (rows <= 1) {
+        long delta = dy != 0 ? dy : dx;
+        if (delta != 0) app->selected_platform = vp_wrap_add(app->selected_platform, delta, count);
+        return;
+    }
+    row = app->selected_platform / (size_t)columns;
+    column = app->selected_platform % (size_t)columns;
+    if (dy != 0) {
+        long new_row = (long)row + dy;
+        while (new_row < 0) new_row += (long)rows;
+        new_row %= (long)rows;
+        target = (size_t)new_row * (size_t)columns + column;
+        if (target >= count) target = count - 1;
+    } else if (dx != 0) {
+        long new_column = (long)column + dx;
+        while (new_column < 0) new_column += columns;
+        new_column %= columns;
+        target = row * (size_t)columns + (size_t)new_column;
+        if (target >= count) target = 0;
+    } else {
+        return;
+    }
+    app->selected_platform = target;
+}
+
+static void vp_move_items(VpApp *app, int dx, int dy, int columns) {
+    size_t count = vp_app_visible(app, vp_visible_scratch, VP_MAX_ITEMS);
+    size_t position = 0;
+    size_t cursor;
+    long delta;
+    if (count == 0) {
+        app->selected_item = 0;
+        return;
+    }
+    for (cursor = 0; cursor < count; cursor++) {
+        if (vp_visible_scratch[cursor] == app->selected_item) {
+            position = cursor;
+            break;
+        }
+    }
+    if (columns < 1) columns = 1;
+    delta = dy != 0 ? (long)dy * (long)columns : dx;
+    if (delta == 0) return;
+    position = vp_wrap_add(position, delta, count);
+    app->selected_item = vp_visible_scratch[position];
+}
+
+void vp_app_move(VpApp *app, int dx, int dy, int columns) {
+    if (app == NULL || (dx == 0 && dy == 0)) return;
+    if (columns < 1) columns = 1;
+    if (app->library_level == VP_LEVEL_PLATFORMS) vp_move_platforms(app, dx, dy, columns);
+    else vp_move_items(app, dx, dy, columns);
+    app->installation_armed = false;
+}
+
+void vp_app_open(VpApp *app) {
+    size_t count;
+    if (app == NULL || app->library_level == VP_LEVEL_ROMS) return;
+    count = vp_catalog_platforms(&app->catalog, vp_platform_scratch, VP_MAX_PLATFORMS);
+    if (count == 0 || app->selected_platform >= count) return;
+    vp_copy(app->active_platform, sizeof(app->active_platform),
+            vp_platform_scratch[app->selected_platform].platform);
+    app->library_level = VP_LEVEL_ROMS;
+    app->selected_item = 0;
+    (void)vp_app_visible(app, vp_visible_scratch, VP_MAX_ITEMS);
+    app->installation_armed = false;
+}
+
+void vp_app_back(VpApp *app) {
+    if (app == NULL || app->library_level != VP_LEVEL_ROMS) return;
+    app->library_level = VP_LEVEL_PLATFORMS;
+    app->active_platform[0] = '\0';
+    app->selected_item = 0;
     app->installation_armed = false;
 }
 
@@ -309,11 +542,19 @@ static bool vp_import_items(VpCatalog *catalog, const char *json, VpSource sourc
                 vp_copy(item.platform, sizeof(item.platform), default_platform);
             }
         }
-        (void)vp_json_value(cursor, end, "description", item.description, sizeof(item.description));
+        (void)vp_json_value(cursor, end, "platform_display_name", item.platform_display,
+                            sizeof(item.platform_display));
+        if (item.platform_display[0] == '\0')
+            vp_copy(item.platform_display, sizeof(item.platform_display), item.platform);
+        if (!vp_json_value(cursor, end, "summary", item.description, sizeof(item.description))) {
+            (void)vp_json_value(cursor, end, "description", item.description, sizeof(item.description));
+        }
         if (!vp_json_value(cursor, end, "download_url", item.download_url, sizeof(item.download_url))) {
             (void)vp_json_value(cursor, end, "url", item.download_url, sizeof(item.download_url));
         }
-        if (!vp_json_value(cursor, end, "cover_url", item.cover_url, sizeof(item.cover_url))) {
+        if (!vp_json_value(cursor, end, "path_cover_small", item.cover_url, sizeof(item.cover_url)) &&
+            !vp_json_value(cursor, end, "path_cover_large", item.cover_url, sizeof(item.cover_url)) &&
+            !vp_json_value(cursor, end, "cover_url", item.cover_url, sizeof(item.cover_url))) {
             (void)vp_json_value(cursor, end, "url_cover", item.cover_url, sizeof(item.cover_url));
         }
         if (vp_catalog_add(catalog, &item) != NULL) imported++;
@@ -447,10 +688,17 @@ static bool vp_romm_import_page(VpCatalog *catalog, const char *json, size_t *it
         if (!vp_json_value(cursor, object_end, "platform", item.platform, sizeof(item.platform)) &&
             !vp_json_value(cursor, object_end, "platform_slug", item.platform, sizeof(item.platform)))
             vp_copy(item.platform, sizeof(item.platform), "romm");
-        (void)vp_json_value(cursor, object_end, "description", item.description, sizeof(item.description));
+        (void)vp_json_value(cursor, object_end, "platform_display_name", item.platform_display,
+                            sizeof(item.platform_display));
+        if (item.platform_display[0] == '\0')
+            vp_copy(item.platform_display, sizeof(item.platform_display), item.platform);
+        if (!vp_json_value(cursor, object_end, "summary", item.description, sizeof(item.description)))
+            (void)vp_json_value(cursor, object_end, "description", item.description, sizeof(item.description));
         if (!vp_json_value(cursor, object_end, "download_url", item.download_url, sizeof(item.download_url)))
             (void)vp_json_value(cursor, object_end, "url", item.download_url, sizeof(item.download_url));
-        if (!vp_json_value(cursor, object_end, "cover_url", item.cover_url, sizeof(item.cover_url)))
+        if (!vp_json_value(cursor, object_end, "path_cover_small", item.cover_url, sizeof(item.cover_url)) &&
+            !vp_json_value(cursor, object_end, "path_cover_large", item.cover_url, sizeof(item.cover_url)) &&
+            !vp_json_value(cursor, object_end, "cover_url", item.cover_url, sizeof(item.cover_url)))
             (void)vp_json_value(cursor, object_end, "url_cover", item.cover_url, sizeof(item.cover_url));
         if (vp_catalog_add(catalog, &item) != NULL) imported++;
         cursor = object_end;

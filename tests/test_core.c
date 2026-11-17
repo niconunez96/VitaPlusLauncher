@@ -92,6 +92,7 @@ static void test_shell_catalog(void) {
     vp_app_init(&app);
     assert(app.active_view == VP_VIEW_GRID);
     assert(app.active_screen == VP_SCREEN_LIBRARY);
+    assert(app.library_level == VP_LEVEL_PLATFORMS);
     assert(strcmp(vp_screen_name(VP_SCREEN_LIBRARY), "Biblioteca") == 0);
     assert(strcmp(vp_screen_name(VP_SCREEN_STORES), "Tiendas") == 0);
     assert(strcmp(vp_screen_name(VP_SCREEN_SETTINGS), "Ajustes") == 0);
@@ -124,11 +125,127 @@ static void test_shell_catalog(void) {
     vp_item_mark_played(&app.catalog.items[1], 200);
     assert(vp_catalog_recent(&app.catalog, indexes, 4) == 2);
     assert(indexes[0] == 1);
+    /* At the platform level the vertical selector moves between console groups,
+     * not between individual catalog items. */
     vp_app_select(&app, 1);
-    assert(app.selected_item == 1);
+    assert(app.selected_platform == 1);
     vp_app_select(&app, 1);
-    assert(app.selected_item == 0);
+    assert(app.selected_platform == 0);
     assert(strcmp(vp_screen_name(VP_SCREEN_STORES), "Tiendas") == 0);
+}
+
+static void test_platform_grouping(void) {
+    VpCatalog catalog;
+    VpPlatformGroup groups[8];
+    size_t indexes[8];
+    VpItem item;
+
+    vp_catalog_init(&catalog);
+    item = make_item("romm:1", "Zelda");
+    (void)snprintf(item.platform, sizeof(item.platform), "nds");
+    (void)snprintf(item.platform_display, sizeof(item.platform_display), "Nintendo DS");
+    assert(vp_catalog_add(&catalog, &item) != NULL);
+    item = make_item("romm:2", "Chrono Trigger");
+    (void)snprintf(item.platform, sizeof(item.platform), "snes");
+    (void)snprintf(item.platform_display, sizeof(item.platform_display), "Super Nintendo");
+    assert(vp_catalog_add(&catalog, &item) != NULL);
+    item = make_item("romm:3", "Patapon");
+    (void)snprintf(item.platform, sizeof(item.platform), "psp");
+    assert(vp_catalog_add(&catalog, &item) != NULL);
+    item = make_item("romm:4", "Advance Wars");
+    (void)snprintf(item.platform, sizeof(item.platform), "nds");
+    assert(vp_catalog_add(&catalog, &item) != NULL);
+
+    assert(vp_catalog_platforms(&catalog, groups, 8) == 3);
+    /* Groups are sorted by display name: Nintendo DS, PSP, Super Nintendo. */
+    assert(strcmp(groups[0].platform, "nds") == 0);
+    assert(strcmp(groups[0].display, "Nintendo DS") == 0);
+    assert(groups[0].count == 2);
+    assert(strcmp(groups[1].platform, "psp") == 0);
+    assert(groups[1].count == 1);
+    assert(strcmp(groups[2].platform, "snes") == 0);
+    assert(groups[2].count == 1);
+
+    /* Items inside a console are sorted by title. */
+    assert(vp_catalog_platform_items(&catalog, "nds", indexes, 8) == 2);
+    assert(strcmp(catalog.items[indexes[0]].title, "Advance Wars") == 0);
+    assert(strcmp(catalog.items[indexes[1]].title, "Zelda") == 0);
+}
+
+static void test_library_navigation(void) {
+    VpApp app;
+    VpItem item;
+    size_t visible[8];
+    size_t index;
+
+    vp_app_init(&app);
+    for (index = 0; index < 5; index++) {
+        char title[16];
+        (void)snprintf(title, sizeof(title), "Game%u", (unsigned)index);
+        item = make_item("romm:nav", title);
+        (void)snprintf(item.id, sizeof(item.id), "romm:nav%u", (unsigned)index);
+        (void)snprintf(item.platform, sizeof(item.platform), "nds");
+        assert(vp_catalog_add(&app.catalog, &item) != NULL);
+    }
+    item = make_item("romm:psp", "Patapon");
+    (void)snprintf(item.platform, sizeof(item.platform), "psp");
+    assert(vp_catalog_add(&app.catalog, &item) != NULL);
+
+    assert(vp_app_visible(&app, visible, 8) == 0);
+    assert(app.selected_platform == 0);
+    vp_app_move(&app, 0, 1, 4);
+    assert(app.selected_platform == 1);
+    vp_app_move(&app, 0, -1, 4);
+    assert(app.selected_platform == 0);
+    vp_app_move(&app, -1, 0, 4);
+    assert(app.selected_platform == 1);
+
+    app.selected_platform = 0;
+    vp_app_open(&app);
+    assert(app.library_level == VP_LEVEL_ROMS);
+    assert(strcmp(app.active_platform, "nds") == 0);
+    assert(vp_app_visible(&app, visible, 8) == 5);
+    assert(app.selected_item == visible[0]);
+
+    vp_app_move(&app, 0, 1, 3);
+    assert(app.selected_item == visible[3]);
+    vp_app_move(&app, 0, -1, 3);
+    assert(app.selected_item == visible[0]);
+    vp_app_move(&app, 1, 0, 3);
+    assert(app.selected_item == visible[1]);
+    vp_app_move(&app, -1, 0, 3);
+    assert(app.selected_item == visible[0]);
+    vp_app_move(&app, -1, 0, 3);
+    assert(app.selected_item == visible[4]);
+    vp_app_move(&app, 1, 0, 3);
+    assert(app.selected_item == visible[0]);
+
+    /* A one-column list maps left/right onto vertical movement so every arrow works. */
+    vp_app_move(&app, 1, 0, 1);
+    assert(app.selected_item == visible[1]);
+
+    vp_app_back(&app);
+    assert(app.library_level == VP_LEVEL_PLATFORMS);
+}
+
+static void test_romm_metadata(void) {
+    VpCatalog catalog;
+    VpItem *item;
+    const char *json = "{\"items\":[{\"id\":7,\"name\":\"Metroid\","
+                       "\"platform_slug\":\"nds\",\"platform_display_name\":\"Nintendo DS\","
+                       "\"summary\":\"A sci-fi adventure\","
+                       "\"path_cover_small\":\"/assets/romm/resources/roms/7/7/cover/small.png\","
+                       "\"path_cover_large\":\"/assets/romm/resources/roms/7/7/cover/big.png\","
+                       "\"url_cover\":\"https://provider.example/cover.jpg\","
+                       "\"download_url\":\"/api/roms/7/download\"}]}";
+
+    vp_catalog_init(&catalog);
+    assert(vp_romm_import(&catalog, json));
+    item = vp_catalog_find(&catalog, "romm:7");
+    assert(item != NULL);
+    assert(strcmp(item->platform_display, "Nintendo DS") == 0);
+    assert(strcmp(item->description, "A sci-fi adventure") == 0);
+    assert(strcmp(item->cover_url, "/assets/romm/resources/roms/7/7/cover/small.png") == 0);
 }
 
 static void test_theme(void) {
@@ -333,6 +450,9 @@ int main(void) {
     VpItem sample = make_item("local:sample", "Sample");
     assert(strcmp(sample.title, "Sample") == 0);
     test_shell_catalog();
+    test_platform_grouping();
+    test_library_navigation();
+    test_romm_metadata();
     test_theme();
     test_local_library();
     test_romm_pair_code_exchange();

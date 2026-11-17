@@ -5,10 +5,14 @@
 #include <stddef.h>
 
 #define VP_MAX_ITEMS 256
+#define VP_MAX_PLATFORMS 64
 #define VP_TEXT 192
 #define VP_URL 384
 #define VP_PATH 256
 #define VP_MAX_QUERY 80
+/* A single RomM ROM object already weighs 17-30 KiB with metadata; leave headroom so a
+ * metadata-heavy entry does not overflow the fixed core response buffer. */
+#define VP_FETCH_RESPONSE_SIZE (256 * 1024)
 
 typedef enum {
     VP_SOURCE_LOCAL,
@@ -36,10 +40,16 @@ typedef enum {
     VP_SCREEN_SETTINGS
 } VpScreen;
 
+typedef enum {
+    VP_LEVEL_PLATFORMS,
+    VP_LEVEL_ROMS
+} VpLibraryLevel;
+
 typedef struct {
     char id[VP_TEXT];
     char title[VP_TEXT];
     char platform[VP_TEXT];
+    char platform_display[VP_TEXT];
     char description[VP_TEXT];
     char launch_target[VP_PATH];
     char remote_id[32];
@@ -56,6 +66,12 @@ typedef struct {
     VpItem items[VP_MAX_ITEMS];
     size_t count;
 } VpCatalog;
+
+typedef struct {
+    char platform[VP_TEXT];
+    char display[VP_TEXT];
+    size_t count;
+} VpPlatformGroup;
 
 typedef struct {
     char id[VP_TEXT];
@@ -76,6 +92,9 @@ typedef struct {
     char query[VP_MAX_QUERY];
     VpView active_view;
     VpScreen active_screen;
+    VpLibraryLevel library_level;
+    char active_platform[VP_TEXT];
+    size_t selected_platform;
     size_t selected_item;
     bool installation_armed;
     char notice[VP_TEXT];
@@ -124,6 +143,10 @@ void vp_app_init(VpApp *app);
 void vp_app_cycle_screen(VpApp *app, int direction);
 void vp_app_cycle_view(VpApp *app);
 void vp_app_select(VpApp *app, int direction);
+void vp_app_move(VpApp *app, int dx, int dy, int columns);
+void vp_app_open(VpApp *app);
+void vp_app_back(VpApp *app);
+size_t vp_app_visible(VpApp *app, size_t *indexes, size_t capacity);
 const char *vp_screen_name(VpScreen screen);
 void vp_catalog_init(VpCatalog *catalog);
 VpItem *vp_catalog_add(VpCatalog *catalog, const VpItem *item);
@@ -131,6 +154,9 @@ VpItem *vp_catalog_find(VpCatalog *catalog, const char *id);
 size_t vp_catalog_search(const VpCatalog *catalog, const char *query,
                          size_t *indexes, size_t capacity);
 size_t vp_catalog_recent(const VpCatalog *catalog, size_t *indexes, size_t capacity);
+size_t vp_catalog_platforms(const VpCatalog *catalog, VpPlatformGroup *groups, size_t capacity);
+size_t vp_catalog_platform_items(const VpCatalog *catalog, const char *platform,
+                                 size_t *indexes, size_t capacity);
 void vp_item_toggle_favorite(VpItem *item);
 void vp_item_mark_played(VpItem *item, unsigned long timestamp);
 
