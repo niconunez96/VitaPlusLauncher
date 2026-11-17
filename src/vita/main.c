@@ -6,6 +6,7 @@
 #include <vita2d.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "vita_backend.h"
@@ -19,6 +20,7 @@ static VpHomebrewConfig homebrew_config;
 static VpApp app;
 static VpCatalog romm_catalog;
 static char active_theme[VP_TEXT] = "default";
+static char romm_pair_code[VP_TEXT];
 static int settings_field;
 static bool settings_ime_active;
 static SceWChar16 settings_ime_buffer[VP_URL];
@@ -130,16 +132,16 @@ static void settings_wide_to_text(const SceWChar16 *source, char *destination, s
 
 static bool settings_start_ime(void) {
     SceImeDialogParam param;
-    const char *value = settings_field == 0 ? romm_config.base_url : romm_config.token;
-    size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_config.token);
+    const char *value = settings_field == 0 ? romm_config.base_url : romm_pair_code;
+    size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_pair_code);
     settings_text_to_wide(value, settings_ime_buffer, sizeof(settings_ime_buffer) / sizeof(settings_ime_buffer[0]));
     sceImeDialogParamInit(&param);
     param.supportedLanguages = SCE_IME_LANGUAGE_ENGLISH | SCE_IME_LANGUAGE_SPANISH;
     param.type = settings_field == 0 ? SCE_IME_TYPE_URL : SCE_IME_TYPE_BASIC_LATIN;
     param.option = SCE_IME_OPTION_NO_AUTO_CAPITALIZATION;
     param.dialogMode = SCE_IME_DIALOG_DIALOG_MODE_WITH_CANCEL;
-    param.textBoxMode = settings_field == 0 ? SCE_IME_DIALOG_TEXTBOX_MODE_DEFAULT : SCE_IME_DIALOG_TEXTBOX_MODE_PASSWORD;
-    param.title = settings_field == 0 ? (const SceWChar16 *)u"URL de RomM" : (const SceWChar16 *)u"Token de RomM";
+    param.textBoxMode = SCE_IME_DIALOG_TEXTBOX_MODE_DEFAULT;
+    param.title = settings_field == 0 ? (const SceWChar16 *)u"URL de RomM" : (const SceWChar16 *)u"Pair code de RomM";
     param.maxTextLength = (SceUInt32)(capacity - 1);
     param.initialText = settings_ime_buffer;
     param.inputTextBuffer = settings_ime_buffer;
@@ -154,11 +156,11 @@ static void settings_finish_ime(VpApp *app) {
     memset(&result, 0, sizeof(result));
     (void)sceImeDialogGetResult(&result);
     if (result.button == SCE_IME_DIALOG_BUTTON_ENTER) {
-        char *value = settings_field == 0 ? romm_config.base_url : romm_config.token;
-        size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_config.token);
+        char *value = settings_field == 0 ? romm_config.base_url : romm_pair_code;
+        size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_pair_code);
         settings_wide_to_text(settings_ime_buffer, value, capacity);
         (void)snprintf(app->notice, sizeof(app->notice), "%s actualizado; Triangulo guarda y sincroniza",
-                       settings_field == 0 ? "URL" : "Token");
+                       settings_field == 0 ? "URL" : "Pair code");
     }
     (void)sceImeDialogTerm();
     settings_ime_active = false;
@@ -170,12 +172,18 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
     if (pressed & SCE_CTRL_CROSS && !settings_start_ime())
         (void)snprintf(app->notice, sizeof(app->notice), "No se pudo abrir el teclado de PS Vita");
     if (pressed & SCE_CTRL_TRIANGLE) {
-        if (!save_romm_config()) {
+        VpRommPairBackend pair_backend = {vp_vita_exchange_pair_code, NULL};
+        if (romm_pair_code[0] != '\0' &&
+            !vp_romm_exchange_pair_code(&romm_config, romm_pair_code, pair_backend)) {
+            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo canjear el pair code de RomM");
+        } else if (!save_romm_config()) {
             (void)snprintf(app->notice, sizeof(app->notice), "No se pudo guardar la configuracion");
-        } else if (sync_romm_catalog(app)) {
-            (void)snprintf(app->notice, sizeof(app->notice), "RomM sincronizado: %u juegos", (unsigned)app->catalog.count);
         } else {
-            (void)snprintf(app->notice, sizeof(app->notice), "Guardado; no se pudo sincronizar RomM");
+            memset(romm_pair_code, 0, sizeof(romm_pair_code));
+            if (sync_romm_catalog(app))
+                (void)snprintf(app->notice, sizeof(app->notice), "RomM sincronizado: %u juegos", (unsigned)app->catalog.count);
+            else
+                (void)snprintf(app->notice, sizeof(app->notice), "No se pudo sincronizar: %.96s; revisa network.log", vp_vita_last_error());
         }
     }
 }
@@ -275,18 +283,18 @@ static void draw_shell(vita2d_pgf *font, const VpApp *app) {
     vita2d_pgf_draw_text(font, 734, 112, muted, 0.8f, vp_view_name(app->active_view));
     if (app->active_screen == VP_SCREEN_SETTINGS) {
         const char *url_prefix = settings_field == 0 ? "> " : "  ";
-        const char *token_prefix = settings_field == 1 ? "> " : "  ";
+        const char *pair_prefix = settings_field == 1 ? "> " : "  ";
         vita2d_pgf_draw_text(font, 42, 175, text, 0.82f, "RomM server");
         vita2d_pgf_draw_textf(font, 42, 218, settings_field == 0 ? accent : text, 0.68f,
                               "%sURL: %s", url_prefix,
                               romm_config.base_url[0] != '\0' ? romm_config.base_url : "(sin configurar)");
         vita2d_pgf_draw_textf(font, 42, 258, settings_field == 1 ? accent : text, 0.68f,
-                              "%sToken: %s", token_prefix,
-                              romm_config.token[0] != '\0' ? "********" : "(sin configurar)");
+                              "%sPair code: %s", pair_prefix,
+                              romm_pair_code[0] != '\0' ? romm_pair_code : "(ingresa el codigo de 8 caracteres)");
         vita2d_pgf_draw_text(font, 42, 314, muted, 0.58f,
-                             "Arriba/Abajo campo | X abre teclado PS Vita | Triangulo guarda y sincroniza");
+                             "Arriba/Abajo campo | X abre teclado PS Vita | Triangulo canjea, guarda y sincroniza");
         vita2d_pgf_draw_text(font, 42, 342, muted, 0.58f,
-                             "Usa un token de solo lectura de RomM");
+                             "Crea Pair Device en RomM; el codigo se canjea una vez y no se guarda");
         if (app->notice[0] != '\0') vita2d_pgf_draw_text(font, 42, 410, RGBA(245, 174, 79, 255), 0.62f, app->notice);
         return;
     }
@@ -315,6 +323,7 @@ int main(void) {
         "snes-smw|Super Mario World|SNES|ux0:data/roms/snes/smw.sfc\n"
         "psp-patapon|Patapon|PSP|ux0:pspemu/ISO/Patapon.iso\n";
     vp_app_init(&app);
+    if (setenv("OPENSSL_CONF", "app0:openssl.cnf", 1) != 0) return 1;
     (void)vp_local_import_manifest(&app.catalog, local_manifest);
     load_providers(&app);
     vita2d_init();

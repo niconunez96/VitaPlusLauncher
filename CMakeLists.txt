@@ -27,11 +27,14 @@ if(DEFINED ENV{VITASDK})
     SceCtrl_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub SceCommonDialog_stub SceIme_stub
     ScePgf_stub SceIofilemgr_stub SceNet_stub SceNetCtl_stub SceSsl_stub SceSysmodule_stub
     ScePromoterUtil_stub_weak)
+  configure_file("$ENV{VITASDK}/arm-vita-eabi/ssl/openssl.cnf"
+    "${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf" COPYONLY)
   vita_create_self(eboot.bin vitaplus UNSAFE)
   vita_create_vpk(vitaplus.vpk ${VITA_TITLEID} eboot.bin
     VERSION ${VITA_VERSION}
     NAME ${VITA_APP_NAME}
-    FILE ${CMAKE_CURRENT_SOURCE_DIR}/themes/default/theme.ini assets/default/theme.ini)
+    FILE ${CMAKE_CURRENT_SOURCE_DIR}/themes/default/theme.ini assets/default/theme.ini
+         ${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf openssl.cnf)
 else()
   message(STATUS "VITASDK not set: only vitaplus_core is configured")
 endif()

@@ -23,6 +23,25 @@ typedef struct {
     int fail_at_call;
 } FetchLog;
 
+typedef struct {
+    int calls;
+    char url[VP_URL];
+    char code[VP_TEXT];
+    const char *response;
+    bool succeed;
+} PairLog;
+
+static bool fake_pair(const char *url, const char *code,
+                      char *response, size_t response_capacity, void *context) {
+    PairLog *log = context;
+    log->calls++;
+    (void)snprintf(log->url, sizeof(log->url), "%s", url);
+    (void)snprintf(log->code, sizeof(log->code), "%s", code);
+    if (!log->succeed) return false;
+    (void)snprintf(response, response_capacity, "%s", log->response);
+    return true;
+}
+
 static bool fake_fetch(const char *url, const char *bearer_token,
                        char *response, size_t response_capacity, void *context) {
     FetchLog *log = context;
@@ -127,6 +146,33 @@ static void test_local_library(void) {
     assert(catalog.count == 2);
     assert(vp_catalog_find(&catalog, "local:pcse00120") != NULL);
     assert(vp_catalog_find(&catalog, "local:snes-smw")->installed);
+}
+
+static void test_romm_pair_code_exchange(void) {
+    PairLog pair_log;
+    VpRommPairBackend backend;
+    VpRommConfig config;
+
+    memset(&pair_log, 0, sizeof(pair_log));
+    memset(&config, 0, sizeof(config));
+    (void)snprintf(config.base_url, sizeof(config.base_url), "https://romm.local/");
+    (void)snprintf(config.token, sizeof(config.token), "rmm_existing_token");
+    pair_log.succeed = true;
+    pair_log.response = "{\"id\":4,\"raw_token\":\"rmm_paired_token\"}";
+    backend.execute = fake_pair;
+    backend.context = &pair_log;
+
+    assert(vp_romm_exchange_pair_code(&config, "ABCD-1234", backend));
+    assert(pair_log.calls == 1);
+    assert(strcmp(pair_log.url, "https://romm.local/api/client-tokens/exchange") == 0);
+    assert(strcmp(pair_log.code, "ABCD-1234") == 0);
+    assert(strcmp(config.token, "rmm_paired_token") == 0);
+
+    pair_log.succeed = false;
+    assert(!vp_romm_exchange_pair_code(&config, "WXYZ-9999", backend));
+    assert(strcmp(config.token, "rmm_paired_token") == 0);
+    assert(!vp_romm_exchange_pair_code(&config, "invalid code!", backend));
+    assert(pair_log.calls == 2);
 }
 
 static void test_romm_sync(void) {
@@ -282,6 +328,7 @@ int main(void) {
     test_shell_catalog();
     test_theme();
     test_local_library();
+    test_romm_pair_code_exchange();
     test_romm_sync();
     test_romm_pagination();
     test_romm_sync_fails_after_partial_page();

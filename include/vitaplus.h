@@ -91,6 +91,14 @@ typedef struct {
     void *context;
 } VpFetchBackend;
 
+typedef bool (*VpRommPairFn)(const char *url, const char *code,
+                             char *response, size_t response_capacity, void *context);
+
+typedef struct {
+    VpRommPairFn execute;
+    void *context;
+} VpRommPairBackend;
+
 typedef struct {
     char base_url[VP_URL];
     char token[VP_TEXT];
@@ -134,6 +142,8 @@ const char *vp_view_name(VpView view);
 
 bool vp_local_import_manifest(VpCatalog *catalog, const char *manifest);
 bool vp_romm_import(VpCatalog *catalog, const char *json);
+bool vp_romm_exchange_pair_code(VpRommConfig *config, const char *code,
+                                VpRommPairBackend backend);
 bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
                   VpFetchBackend backend);
 bool vp_cache_cover(const VpItem *item, const VpRommConfig *config, const char *destination,
