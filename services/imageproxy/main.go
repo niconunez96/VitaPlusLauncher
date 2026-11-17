@@ -32,12 +32,14 @@ type Config struct {
 	MaxSourceBytes  int64
 	MaxPixels       int
 	MaxOutputPixels int
+	Logger          *log.Logger
 }
 
 type handler struct {
 	maxSourceBytes  int64
 	maxPixels       int
 	maxOutputPixels int
+	logger          *log.Logger
 }
 
 func main() {
@@ -62,10 +64,14 @@ func NewHandler(config Config) http.Handler {
 	if config.MaxOutputPixels <= 0 {
 		config.MaxOutputPixels = maxOutputDimension * maxOutputDimension
 	}
+	if config.Logger == nil {
+		config.Logger = log.Default()
+	}
 	return &handler{
 		maxSourceBytes:  config.MaxSourceBytes,
 		maxPixels:       config.MaxPixels,
 		maxOutputPixels: config.MaxOutputPixels,
+		logger:          config.Logger,
 	}
 }
 
@@ -103,8 +109,11 @@ func (service *handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	writer.Header().Set("Content-Type", "image/png")
 	writer.Header().Set("Cache-Control", "public, max-age=86400")
 	if err := png.Encode(writer, centerCropAndScale(source, width, height)); err != nil {
-		log.Printf("encode image: %v", err)
+		service.logger.Printf("encode image: %v", err)
+		return
 	}
+	bounds := source.Bounds()
+	service.logger.Printf("processed image: source=%dx%d output=%dx%d", bounds.Dx(), bounds.Dy(), width, height)
 }
 
 func parseDimensions(request *http.Request) (int, int, error) {
@@ -156,7 +165,7 @@ func (service *handler) writeImageError(writer http.ResponseWriter, err error) {
 		message = err.Error()
 	}
 	http.Error(writer, message, status)
-	log.Printf("image request failed: %v", err)
+	service.logger.Printf("image request failed: %v", err)
 }
 
 func centerCropAndScale(source image.Image, targetWidth, targetHeight int) *image.NRGBA {

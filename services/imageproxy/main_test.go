@@ -5,8 +5,10 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +64,22 @@ func TestHealthReturnsOK(t *testing.T) {
 	}
 	if response.Body.String() != "ok\n" {
 		t.Fatalf("body = %q, want %q", response.Body.String(), "ok\n")
+	}
+}
+
+func TestImageLogsSuccessfulProcessing(t *testing.T) {
+	var logs bytes.Buffer
+	handler := NewHandler(Config{Logger: log.New(&logs, "", 0)})
+	request := httptest.NewRequest(http.MethodPost, "/image?width=100&height=120", sourcePNG(t, 400, 200))
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if !strings.Contains(logs.String(), "processed image: source=400x200 output=100x120") {
+		t.Fatalf("log = %q, want successful processing details", logs.String())
 	}
 }
 
