@@ -636,6 +636,32 @@ static bool vp_join_url(char *destination, size_t capacity,
     return true;
 }
 
+bool vp_url_escape(const char *url, char *destination, size_t capacity) {
+    static const char hex[] = "0123456789ABCDEF";
+    const unsigned char *cursor;
+    size_t used = 0;
+    if (url == NULL || destination == NULL || capacity == 0) return false;
+    destination[0] = '\0';
+    for (cursor = (const unsigned char *)url; *cursor != '\0'; cursor++) {
+        char character = (char)*cursor;
+        bool escape = *cursor <= 0x20 || *cursor >= 0x7F ||
+                      strchr("\"<>\\^`{|}", character) != NULL;
+        if (used + (escape ? 3 : 1) + 1 > capacity) {
+            destination[0] = '\0';
+            return false;
+        }
+        if (escape) {
+            destination[used++] = '%';
+            destination[used++] = hex[*cursor >> 4];
+            destination[used++] = hex[*cursor & 0x0F];
+        } else {
+            destination[used++] = character;
+        }
+    }
+    destination[used] = '\0';
+    return true;
+}
+
 static const char *vp_array_end(const char *begin) {
     int depth = 0;
     bool quoted = false;

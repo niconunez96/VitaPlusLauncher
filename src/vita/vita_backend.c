@@ -30,6 +30,8 @@ typedef struct {
 
 /* Transfers run on the single UI thread, so this avoids an oversized Vita stack frame. */
 static char extract_block[8192];
+/* RomM cover paths carry a timestamp with a literal space; libcurl rejects such URLs. */
+static char transfer_url[VP_URL * 3];
 static char last_error[VP_TEXT];
 
 const char *vp_vita_last_error(void) {
@@ -306,7 +308,8 @@ bool vp_vita_transfer(const char *url, const char *bearer_token, const char *des
     char authorization[VP_TEXT + 32];
     (void)context;
     if (url == NULL || destination == NULL || !valid_bearer_token(bearer_token) ||
-        !make_parent_dirs(destination)) return false;
+        !make_parent_dirs(destination) || !vp_url_escape(url, transfer_url, sizeof(transfer_url)))
+        return false;
     file.fd = sceIoOpen(destination, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
     if (file.fd < 0) return false;
     curl = curl_easy_init();
@@ -325,7 +328,7 @@ bool vp_vita_transfer(const char *url, const char *bearer_token, const char *des
             return false;
         }
     }
-    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_URL, transfer_url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, file_write);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &file);
@@ -342,6 +345,7 @@ bool vp_vita_transfer(const char *url, const char *bearer_token, const char *des
     sceIoClose(file.fd);
     downloaded = result == CURLE_OK && status >= 200 && status < 300;
     if (!downloaded) {
+        record_http_failure(transfer_url, result, status, NULL, false);
         (void)sceIoRemove(destination);
         return false;
     }

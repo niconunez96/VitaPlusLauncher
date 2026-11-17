@@ -248,6 +248,24 @@ static void test_romm_metadata(void) {
     assert(strcmp(item->cover_url, "/assets/romm/resources/roms/7/7/cover/small.png") == 0);
 }
 
+static void test_url_escape(void) {
+    char escaped[VP_URL * 3];
+
+    /* RomM emits cover timestamps with a literal space, which libcurl rejects outright. */
+    assert(vp_url_escape("http://romm.local/assets/1/cover/small.png?ts=2026-10-06 23:56:16",
+                         escaped, sizeof(escaped)));
+    assert(strcmp(escaped,
+                  "http://romm.local/assets/1/cover/small.png?ts=2026-10-06%2023:56:16") == 0);
+    /* Already-encoded URLs must not be double encoded. */
+    assert(vp_url_escape("http://romm.local/a.png?ts=2026-10-06%2023:56:16",
+                         escaped, sizeof(escaped)));
+    assert(strcmp(escaped, "http://romm.local/a.png?ts=2026-10-06%2023:56:16") == 0);
+    assert(vp_url_escape("http://romm.local/a b/{c}.png", escaped, sizeof(escaped)));
+    assert(strcmp(escaped, "http://romm.local/a%20b/%7Bc%7D.png") == 0);
+    assert(!vp_url_escape("http://romm.local/a b.png", escaped, 5));
+    assert(escaped[0] == '\0');
+}
+
 static void test_theme(void) {
     VpTheme theme;
     const char *ini = "id=amber\nname=Amber Pulse\nbackground=#000000\nsurface=#111111\n"
@@ -453,6 +471,7 @@ int main(void) {
     test_platform_grouping();
     test_library_navigation();
     test_romm_metadata();
+    test_url_escape();
     test_theme();
     test_local_library();
     test_romm_pair_code_exchange();

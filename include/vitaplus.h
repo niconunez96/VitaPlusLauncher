@@ -164,6 +164,11 @@ bool vp_theme_load(VpTheme *theme, const char *ini_text);
 const char *vp_source_name(VpSource source);
 const char *vp_view_name(VpView view);
 
+/* Percent-encodes bytes that RFC 3986 forbids in a URL (spaces, quotes, braces, controls,
+ * non-ASCII). Existing %XX sequences are preserved so URLs are never double encoded.
+ * Returns false when the escaped result does not fit in destination. */
+bool vp_url_escape(const char *url, char *destination, size_t capacity);
+
 bool vp_local_import_manifest(VpCatalog *catalog, const char *manifest);
 bool vp_romm_import(VpCatalog *catalog, const char *json);
 bool vp_romm_exchange_pair_code(VpRommConfig *config, const char *code,
