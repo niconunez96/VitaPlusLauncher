@@ -13,6 +13,7 @@
 #define VP_MAX_LAUNCH_PROFILES 32
 #define VP_LAUNCH_URI 768
 #define VP_DOWNLOAD_EXTENSION 16
+#define VP_MAX_DOWNLOAD_QUEUE 16
 /* A single RomM ROM object already weighs 17-30 KiB with metadata; leave headroom so a
  * metadata-heavy entry does not overflow the fixed core response buffer. */
 #define VP_FETCH_RESPONSE_SIZE (256 * 1024)
@@ -66,6 +67,28 @@ typedef struct {
     bool multi_file;
     unsigned long last_played;
 } VpItem;
+
+typedef enum {
+    VP_DOWNLOAD_PENDING,
+    VP_DOWNLOAD_DOWNLOADING,
+    VP_DOWNLOAD_COMPLETED,
+    VP_DOWNLOAD_FAILED,
+    VP_DOWNLOAD_CANCELED
+} VpDownloadState;
+
+typedef struct {
+    VpItem item;
+    char destination[VP_PATH];
+    char partial[VP_PATH + 8];
+    char error[VP_TEXT];
+    VpDownloadState state;
+    unsigned int percent;
+} VpDownloadEntry;
+
+typedef struct {
+    VpDownloadEntry entries[VP_MAX_DOWNLOAD_QUEUE];
+    size_t count;
+} VpDownloadQueue;
 
 typedef struct {
     VpItem items[VP_MAX_ITEMS];
@@ -175,6 +198,17 @@ size_t vp_catalog_platform_items(const VpCatalog *catalog, const char *platform,
                                  size_t *indexes, size_t capacity);
 void vp_item_toggle_favorite(VpItem *item);
 void vp_item_mark_played(VpItem *item, unsigned long timestamp);
+
+void vp_download_queue_init(VpDownloadQueue *queue);
+VpDownloadEntry *vp_download_queue_find(VpDownloadQueue *queue, const char *item_id);
+bool vp_download_queue_enqueue(VpDownloadQueue *queue, const VpItem *item,
+                               const char *destination, const char *partial);
+VpDownloadEntry *vp_download_queue_start_next(VpDownloadQueue *queue);
+void vp_download_queue_progress(VpDownloadEntry *entry,
+                                unsigned long long downloaded, unsigned long long total);
+void vp_download_queue_finish(VpDownloadEntry *entry, bool succeeded, const char *error);
+bool vp_download_queue_cancel(VpDownloadQueue *queue, const char *item_id);
+bool vp_download_queue_retry(VpDownloadQueue *queue, const char *item_id);
 
 bool vp_theme_load(VpTheme *theme, const char *ini_text);
 const char *vp_source_name(VpSource source);

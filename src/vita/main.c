@@ -28,6 +28,7 @@ static char active_theme[VP_TEXT] = "default";
 static char romm_pair_code[VP_TEXT];
 static int settings_section;
 static int settings_field;
+static size_t download_selection;
 static bool settings_detail_active;
 static bool settings_ime_active;
 static SceWChar16 settings_ime_buffer[VP_URL];
@@ -56,6 +57,9 @@ typedef struct {
     char partial[VP_PATH + 8];
     char pair_code[VP_TEXT];
     char error[VP_TEXT];
+    unsigned long long downloaded;
+    unsigned long long total;
+    bool cancel_requested;
 } VpBackgroundJob;
 
 /* The core fetch buffer and backend diagnostics are deliberately single-owner. One worker keeps
@@ -63,6 +67,7 @@ typedef struct {
 static VpBackgroundJob background_job = {
     .mutex = PTHREAD_MUTEX_INITIALIZER
 };
+static VpDownloadQueue download_queue;
 #define VP_COVER_SLOTS 8
 static VpPlatformGroup platform_groups[VP_MAX_PLATFORMS];
 static size_t visible_indexes[VP_MAX_ITEMS];
@@ -72,6 +77,8 @@ static VpLibraryLevel cached_library_level;
 static char cached_platform[VP_TEXT];
 static bool catalog_view_cache_dirty = true;
 static char unavailable_cover_ids[VP_COVER_SLOTS][VP_TEXT];
+
+static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context);
 
 static bool save_catalog_cache(const VpCatalog *catalog, const VpRommConfig *config) {
     static const char magic[] = "VPCAT01";
@@ -312,7 +319,9 @@ static void *background_job_run(void *context) {
         else if (kind == VP_JOB_FETCH_COVER)
             succeeded = vp_cache_cover(&item, &config, target, transfer_backend);
         else
-            succeeded = vp_queue_download(&item, &config, target, transfer_backend);
+            succeeded = vp_vita_transfer_with_progress(item.download_url, config.token, target,
+                                                       VP_TRANSFER_DOWNLOAD, download_progress,
+                                                       job, NULL);
         if (succeeded && kind == VP_JOB_DOWNLOAD_ROM) {
             succeeded = sceIoRename(partial, destination) >= 0;
             if (!succeeded) (void)sceIoRemove(partial);
@@ -344,6 +353,9 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
     background_job.completed = false;
     background_job.succeeded = false;
     background_job.error[0] = '\0';
+    background_job.downloaded = 0;
+    background_job.total = 0;
+    background_job.cancel_requested = false;
     background_job.romm = romm_config;
     background_job.homebrew = homebrew_config;
     (void)snprintf(background_job.pair_code, sizeof(background_job.pair_code), "%s", romm_pair_code);
@@ -360,6 +372,33 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
     return result == 0;
 }
 
+static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context) {
+    VpBackgroundJob *job = context;
+    bool canceled;
+    pthread_mutex_lock(&job->mutex);
+    job->downloaded = downloaded;
+    job->total = total;
+    canceled = job->cancel_requested;
+    pthread_mutex_unlock(&job->mutex);
+    return canceled;
+}
+
+static bool start_next_download(void) {
+    VpDownloadEntry *entry;
+    pthread_mutex_lock(&background_job.mutex);
+    if (background_job.active) {
+        pthread_mutex_unlock(&background_job.mutex);
+        return false;
+    }
+    pthread_mutex_unlock(&background_job.mutex);
+    entry = vp_download_queue_start_next(&download_queue);
+    if (entry == NULL) return false;
+    if (background_job_start(VP_JOB_DOWNLOAD_ROM, &entry->item, entry->destination, entry->partial))
+        return true;
+    vp_download_queue_finish(entry, false, "No se pudo iniciar la descarga");
+    return false;
+}
+
 static void background_job_poll(VpApp *app) {
     VpJobKind kind;
     VpItem item;
@@ -367,6 +406,7 @@ static void background_job_poll(VpApp *app) {
     char destination[VP_PATH];
     char error[VP_TEXT];
     bool succeeded;
+    bool canceled;
 
     pthread_mutex_lock(&background_job.mutex);
     if (!background_job.active || !background_job.completed) {
@@ -379,6 +419,7 @@ static void background_job_poll(VpApp *app) {
     config = background_job.romm;
     (void)snprintf(destination, sizeof(destination), "%s", background_job.destination);
     (void)snprintf(error, sizeof(error), "%s", background_job.error);
+    canceled = background_job.cancel_requested;
     pthread_mutex_unlock(&background_job.mutex);
 
     (void)pthread_join(background_job.thread, NULL);
@@ -387,12 +428,14 @@ static void background_job_poll(VpApp *app) {
     background_job.kind = VP_JOB_NONE;
     pthread_mutex_unlock(&background_job.mutex);
 
-    if (!succeeded) {
+    if (!succeeded && kind != VP_JOB_DOWNLOAD_ROM) {
         if (kind == VP_JOB_FETCH_COVER) {
             mark_cover_unavailable(item.id);
+            (void)start_next_download();
             return;
         }
         (void)snprintf(app->notice, sizeof(app->notice), "Operacion fallida: %.140s", error);
+        (void)start_next_download();
         return;
     }
     if (kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC) {
@@ -401,6 +444,7 @@ static void background_job_poll(VpApp *app) {
             memset(romm_pair_code, 0, sizeof(romm_pair_code));
             if (!save_romm_config()) {
                 (void)snprintf(app->notice, sizeof(app->notice), "Sincronizado, pero no se pudo guardar la configuracion");
+                (void)start_next_download();
                 return;
             }
         }
@@ -408,6 +452,25 @@ static void background_job_poll(VpApp *app) {
         (void)snprintf(app->notice, sizeof(app->notice), "Biblioteca sincronizada: %u juegos",
                        (unsigned)app->catalog.count);
     } else if (kind == VP_JOB_DOWNLOAD_ROM) {
+        VpDownloadEntry *entry = vp_download_queue_find(&download_queue, item.id);
+        if (entry != NULL) {
+            if (canceled) {
+                entry->state = VP_DOWNLOAD_CANCELED;
+                entry->percent = 0;
+                entry->error[0] = '\0';
+            } else {
+                vp_download_queue_finish(entry, succeeded, error);
+            }
+        }
+        if (!succeeded && canceled) {
+            (void)snprintf(app->notice, sizeof(app->notice), "Descarga cancelada");
+            (void)start_next_download();
+            return;
+        }
+        if (!succeeded) {
+            (void)start_next_download();
+            return;
+        }
         VpItem *completed = vp_catalog_find(&app->catalog, item.id);
         if (completed != NULL) {
             completed->installed = true;
@@ -415,11 +478,13 @@ static void background_job_poll(VpApp *app) {
                            destination);
         }
         (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada; presiona X para jugar");
+        (void)start_next_download();
     } else if (kind == VP_JOB_INSTALL_HOMEBREW) {
         VpItem *completed = vp_catalog_find(&app->catalog, item.id);
         if (completed != NULL) completed->installed = true;
         (void)snprintf(app->notice, sizeof(app->notice), "Instalacion finalizada; revisa LiveArea");
     }
+    if (kind != VP_JOB_DOWNLOAD_ROM) (void)start_next_download();
 }
 
 static bool sync_romm_catalog(VpApp *app) {
@@ -482,13 +547,41 @@ static void settings_finish_ime(VpApp *app) {
 
 static void handle_settings_input(VpApp *app, unsigned int pressed) {
     if (!settings_detail_active) {
-        if (pressed & SCE_CTRL_UP) settings_section = 0;
-        if (pressed & SCE_CTRL_DOWN) settings_section = 1;
+        if (pressed & SCE_CTRL_UP && settings_section > 0) settings_section--;
+        if (pressed & SCE_CTRL_DOWN && settings_section < 2) settings_section++;
         if (pressed & SCE_CTRL_CROSS) settings_detail_active = true;
         return;
     }
     if (pressed & SCE_CTRL_CIRCLE) {
         settings_detail_active = false;
+        return;
+    }
+    if (settings_section == 2) {
+        VpDownloadEntry *entry;
+        if (download_queue.count == 0) return;
+        if (download_selection >= download_queue.count) download_selection = download_queue.count - 1;
+        if (pressed & SCE_CTRL_UP)
+            download_selection = (download_selection + download_queue.count - 1) % download_queue.count;
+        if (pressed & SCE_CTRL_DOWN)
+            download_selection = (download_selection + 1) % download_queue.count;
+        entry = &download_queue.entries[download_selection];
+        if (pressed & SCE_CTRL_CROSS) {
+            if (entry->state == VP_DOWNLOAD_FAILED || entry->state == VP_DOWNLOAD_CANCELED) {
+                (void)vp_download_queue_retry(&download_queue, entry->item.id);
+                (void)start_next_download();
+                (void)snprintf(app->notice, sizeof(app->notice), "Reintentando %.110s", entry->item.title);
+            } else if (entry->state == VP_DOWNLOAD_PENDING || entry->state == VP_DOWNLOAD_DOWNLOADING) {
+                bool active = false;
+                (void)vp_download_queue_cancel(&download_queue, entry->item.id);
+                pthread_mutex_lock(&background_job.mutex);
+                active = background_job.active && background_job.kind == VP_JOB_DOWNLOAD_ROM &&
+                         strcmp(background_job.item.id, entry->item.id) == 0;
+                if (active) background_job.cancel_requested = true;
+                pthread_mutex_unlock(&background_job.mutex);
+                (void)snprintf(app->notice, sizeof(app->notice), active ? "Cancelando descarga" : "Descarga cancelada");
+                if (!active) (void)start_next_download();
+            }
+        }
         return;
     }
     if (settings_section != 0) return;
@@ -886,10 +979,12 @@ static void activate_selected(VpApp *app) {
             return;
         }
         (void)snprintf(partial, sizeof(partial), "%s.part", path);
-        if (background_job_start(VP_JOB_DOWNLOAD_ROM, item, path, partial))
-            (void)snprintf(app->notice, sizeof(app->notice), "Descargando %.110s en segundo plano", item->title);
-        else
-            (void)snprintf(app->notice, sizeof(app->notice), "Hay una operacion en curso; espera a que termine");
+        if (!vp_download_queue_enqueue(&download_queue, item, path, partial)) {
+            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo encolar: ya existe o la cola esta llena");
+            return;
+        }
+        (void)start_next_download();
+        (void)snprintf(app->notice, sizeof(app->notice), "%.110s agregada a Descargas", item->title);
         return;
     }
     (void)snprintf(app->notice, sizeof(app->notice), "Este elemento no tiene un archivo ejecutable");
@@ -901,6 +996,35 @@ static const char *item_state_label(const VpItem *item) {
         return item->installed ? "Descargado" : "Sin descargar";
     }
     return item->installed ? "Instalado" : "Remoto";
+}
+
+static const char *download_state_label(VpDownloadState state) {
+    switch (state) {
+        case VP_DOWNLOAD_PENDING: return "En cola";
+        case VP_DOWNLOAD_DOWNLOADING: return "Descargando";
+        case VP_DOWNLOAD_COMPLETED: return "Completada";
+        case VP_DOWNLOAD_FAILED: return "Fallida";
+        case VP_DOWNLOAD_CANCELED: return "Cancelada";
+    }
+    return "Desconocido";
+}
+
+static void refresh_download_queue_progress(void) {
+    VpItem item;
+    unsigned long long downloaded;
+    unsigned long long total;
+    bool active;
+    pthread_mutex_lock(&background_job.mutex);
+    active = background_job.active && background_job.kind == VP_JOB_DOWNLOAD_ROM;
+    item = background_job.item;
+    downloaded = background_job.downloaded;
+    total = background_job.total;
+    pthread_mutex_unlock(&background_job.mutex);
+    if (active) {
+        VpDownloadEntry *entry = vp_download_queue_find(&download_queue, item.id);
+        if (entry != NULL && entry->state == VP_DOWNLOAD_DOWNLOADING)
+            vp_download_queue_progress(entry, downloaded, total);
+    }
 }
 
 static void draw_shell(vita2d_pgf *font, VpApp *app) {
@@ -916,6 +1040,8 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
     const VpPlatformGroup *selected_group = NULL;
     vita2d_texture *background_texture = NULL;
     size_t index;
+
+    refresh_download_queue_progress();
 
     if (app->active_screen == VP_SCREEN_LIBRARY) {
         refresh_catalog_view_cache(app);
@@ -979,8 +1105,11 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
             vita2d_pgf_draw_textf(font, 42, 185, settings_section == 0 ? accent : text, 0.82f,
                                   "%sRomM", settings_section == 0 ? "> " : "  ");
             vita2d_pgf_draw_textf(font, 42, 235, settings_section == 1 ? accent : text, 0.82f,
-                                  "%sTemas", settings_section == 1 ? "> " : "  ");
-            vita2d_pgf_draw_text(font, 42, 290, muted, 0.58f, "Arriba/Abajo selecciona | X abre");
+                                   "%sTemas", settings_section == 1 ? "> " : "  ");
+            vita2d_pgf_draw_textf(font, 42, 285, settings_section == 2 ? accent : text, 0.82f,
+                                   "%sDescargas (%u)", settings_section == 2 ? "> " : "  ",
+                                   (unsigned)download_queue.count);
+            vita2d_pgf_draw_text(font, 42, 335, muted, 0.58f, "Arriba/Abajo selecciona | X abre");
             return;
         }
         if (settings_section == 1) {
@@ -989,6 +1118,37 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
             vita2d_pgf_draw_text(font, 42, 270, muted, 0.58f,
                                  "Instala temas en ux0:data/vitaplus/themes/<tema>/theme.ini");
             vita2d_pgf_draw_text(font, 42, 298, muted, 0.58f, "Circulo vuelve a Ajustes");
+            return;
+        }
+        if (settings_section == 2) {
+            size_t start;
+            if (download_queue.count == 0) {
+                vita2d_pgf_draw_text(font, 42, 175, text, 0.82f, "Descargas");
+                vita2d_pgf_draw_text(font, 42, 220, muted, 0.68f, "No hay descargas en cola");
+                vita2d_pgf_draw_text(font, 42, 270, muted, 0.58f, "Circulo vuelve a Ajustes");
+                return;
+            }
+            if (download_selection >= download_queue.count) download_selection = download_queue.count - 1;
+            start = (download_selection / 5) * 5;
+            vita2d_pgf_draw_text(font, 42, 175, text, 0.82f, "Descargas");
+            for (index = start; index < download_queue.count && index < start + 5; index++) {
+                const VpDownloadEntry *entry = &download_queue.entries[index];
+                unsigned int color = index == download_selection ? accent : text;
+                const char *prefix = index == download_selection ? "> " : "  ";
+                char status[48];
+                if (entry->state == VP_DOWNLOAD_DOWNLOADING)
+                    (void)snprintf(status, sizeof(status), "Descargando %u%%", entry->percent);
+                else
+                    (void)snprintf(status, sizeof(status), "%s", download_state_label(entry->state));
+                vita2d_pgf_draw_textf(font, 42, 220 + (int)(index - start) * 54, color, 0.64f,
+                                       "%s%.52s - %s", prefix, entry->item.title, status);
+                if (entry->state == VP_DOWNLOAD_FAILED && entry->error[0] != '\0')
+                    vita2d_pgf_draw_textf(font, 64, 242 + (int)(index - start) * 54, muted, 0.48f,
+                                           "%.92s", entry->error);
+            }
+            vita2d_pgf_draw_text(font, 42, 505, muted, 0.55f,
+                                 "X cancela pendiente/activa; X reintenta fallida/cancelada; Circulo vuelve");
+            if (app->notice[0] != '\0') vita2d_pgf_draw_text(font, 42, 530, RGBA(245, 174, 79, 255), 0.54f, app->notice);
             return;
         }
         {
@@ -1062,6 +1222,7 @@ int main(void) {
     unsigned int previous = 0;
     vita2d_pgf *font;
     vp_app_init(&app);
+    vp_download_queue_init(&download_queue);
     vp_launch_config_init(&launch_config);
     if (setenv("OPENSSL_CONF", "app0:openssl.cnf", 1) != 0) return 1;
     (void)sceIoMkdir("ux0:data", 0777);

@@ -75,7 +75,9 @@ Usá la URL base de tu servidor (por ejemplo, `http://192.168.1.100:8080`) y cre
 
 ## Descargas y lanzamiento
 
-Cada ROM de RomM muestra un ícono de descarga (flecha) o un check blanco cuando ya está en `ux0:data/vitaplus/downloads/<plataforma>/`. Presioná `X` sobre una ROM sin descargar para bajarla en segundo plano; podés seguir navegando mientras termina y luego `X` la abre con el emulador configurado.
+Cada ROM de RomM muestra un ícono de descarga (flecha) o un check blanco cuando ya está en `ux0:data/vitaplus/downloads/<plataforma>/`. Presioná `X` sobre una ROM sin descargar para agregarla a la cola en segundo plano; podés seguir navegando mientras termina y luego `X` la abre con el emulador configurado.
+
+En **Ajustes → Descargas** se ve cada elemento con su estado y porcentaje. Con `X` cancelás una descarga pendiente o activa; sobre una descarga fallida o cancelada, `X` la vuelve a encolar. La cola admite hasta 16 ROMs y procesa una por vez para no bloquear la interfaz.
 
 El nombre del archivo conserva la extensión real que reporta RomM (`fs_name` o la URL de contenido): `sfc`, `nds`, `zip`, etc. La descarga usa `<archivo>.part` y renombra al final, así que un corte de red no deja una ROM marcada como lista. Las sincronizaciones, descargas e instalaciones se ejecutan en segundo plano; el estado se vuelve a comprobar al arrancar y después de sincronizar RomM.
 

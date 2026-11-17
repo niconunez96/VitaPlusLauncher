@@ -29,6 +29,11 @@ typedef struct {
     SceUID fd;
 } DownloadFile;
 
+typedef struct {
+    VpTransferProgressFn callback;
+    void *context;
+} TransferProgress;
+
 /* Transfers run on the single UI thread, so this avoids an oversized Vita stack frame. */
 static char extract_block[8192];
 /* RomM cover paths carry a timestamp with a literal space; libcurl rejects such URLs. */
@@ -111,6 +116,17 @@ static size_t file_write(char *data, size_t size, size_t count, void *context) {
         written += (size_t)result;
     }
     return bytes;
+}
+
+static int transfer_progress(void *context, curl_off_t total, curl_off_t downloaded,
+                             curl_off_t upload_total, curl_off_t uploaded) {
+    TransferProgress *progress = context;
+    (void)upload_total;
+    (void)uploaded;
+    if (progress == NULL || progress->callback == NULL) return 0;
+    return progress->callback(downloaded > 0 ? (unsigned long long)downloaded : 0,
+                              total > 0 ? (unsigned long long)total : 0,
+                              progress->context) ? 1 : 0;
 }
 
 static bool has_unsafe_path(const char *path) {
@@ -299,6 +315,14 @@ bool vp_vita_exchange_pair_code(const char *url, const char *code,
 
 bool vp_vita_transfer(const char *url, const char *bearer_token, const char *destination,
                       VpTransferAction action, void *context) {
+    return vp_vita_transfer_with_progress(url, bearer_token, destination, action, NULL, NULL,
+                                          context);
+}
+
+bool vp_vita_transfer_with_progress(const char *url, const char *bearer_token,
+                                    const char *destination, VpTransferAction action,
+                                    VpTransferProgressFn progress_callback, void *progress_context,
+                                    void *context) {
     CURL *curl;
     struct curl_slist *headers = NULL;
     DownloadFile file;
@@ -307,6 +331,7 @@ bool vp_vita_transfer(const char *url, const char *bearer_token, const char *des
     bool installed = true;
     bool downloaded;
     char authorization[VP_TEXT + 32];
+    TransferProgress progress = {progress_callback, progress_context};
     (void)context;
     if (url == NULL || destination == NULL || !valid_bearer_token(bearer_token) ||
         !make_parent_dirs(destination) || !vp_url_escape(url, transfer_url, sizeof(transfer_url)))
@@ -339,6 +364,11 @@ bool vp_vita_transfer(const char *url, const char *bearer_token, const char *des
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    if (progress_callback != NULL) {
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transfer_progress);
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress);
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    }
     result = curl_easy_perform(curl);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
     curl_slist_free_all(headers);

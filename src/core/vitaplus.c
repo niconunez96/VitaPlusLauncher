@@ -120,6 +120,92 @@ void vp_catalog_init(VpCatalog *catalog) {
     if (catalog != NULL) memset(catalog, 0, sizeof(*catalog));
 }
 
+void vp_download_queue_init(VpDownloadQueue *queue) {
+    if (queue != NULL) memset(queue, 0, sizeof(*queue));
+}
+
+VpDownloadEntry *vp_download_queue_find(VpDownloadQueue *queue, const char *item_id) {
+    size_t index;
+    if (queue == NULL || item_id == NULL) return NULL;
+    for (index = 0; index < queue->count; index++) {
+        if (strcmp(queue->entries[index].item.id, item_id) == 0) return &queue->entries[index];
+    }
+    return NULL;
+}
+
+bool vp_download_queue_enqueue(VpDownloadQueue *queue, const VpItem *item,
+                               const char *destination, const char *partial) {
+    VpDownloadEntry *entry;
+    if (queue == NULL || item == NULL || item->id[0] == '\0' || destination == NULL ||
+        partial == NULL || queue->count >= VP_MAX_DOWNLOAD_QUEUE ||
+        vp_download_queue_find(queue, item->id) != NULL) return false;
+    entry = &queue->entries[queue->count++];
+    memset(entry, 0, sizeof(*entry));
+    entry->item = *item;
+    vp_copy(entry->destination, sizeof(entry->destination), destination);
+    vp_copy(entry->partial, sizeof(entry->partial), partial);
+    entry->state = VP_DOWNLOAD_PENDING;
+    return true;
+}
+
+VpDownloadEntry *vp_download_queue_start_next(VpDownloadQueue *queue) {
+    size_t index;
+    if (queue == NULL) return NULL;
+    for (index = 0; index < queue->count; index++) {
+        VpDownloadEntry *entry = &queue->entries[index];
+        if (entry->state == VP_DOWNLOAD_PENDING) {
+            entry->state = VP_DOWNLOAD_DOWNLOADING;
+            entry->percent = 0;
+            entry->error[0] = '\0';
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+void vp_download_queue_progress(VpDownloadEntry *entry,
+                                unsigned long long downloaded, unsigned long long total) {
+    if (entry == NULL || entry->state != VP_DOWNLOAD_DOWNLOADING) return;
+    if (total == 0) {
+        entry->percent = 0;
+        return;
+    }
+    entry->percent = (unsigned int)((downloaded * 100U) / total);
+    if (entry->percent > 100U) entry->percent = 100U;
+}
+
+void vp_download_queue_finish(VpDownloadEntry *entry, bool succeeded, const char *error) {
+    if (entry == NULL) return;
+    if (succeeded) {
+        entry->state = VP_DOWNLOAD_COMPLETED;
+        entry->percent = 100;
+        entry->error[0] = '\0';
+        return;
+    }
+    entry->state = VP_DOWNLOAD_FAILED;
+    vp_copy(entry->error, sizeof(entry->error), error);
+}
+
+bool vp_download_queue_cancel(VpDownloadQueue *queue, const char *item_id) {
+    VpDownloadEntry *entry = vp_download_queue_find(queue, item_id);
+    if (entry == NULL || (entry->state != VP_DOWNLOAD_PENDING &&
+                          entry->state != VP_DOWNLOAD_DOWNLOADING)) return false;
+    entry->state = VP_DOWNLOAD_CANCELED;
+    entry->percent = 0;
+    entry->error[0] = '\0';
+    return true;
+}
+
+bool vp_download_queue_retry(VpDownloadQueue *queue, const char *item_id) {
+    VpDownloadEntry *entry = vp_download_queue_find(queue, item_id);
+    if (entry == NULL || (entry->state != VP_DOWNLOAD_FAILED &&
+                          entry->state != VP_DOWNLOAD_CANCELED)) return false;
+    entry->state = VP_DOWNLOAD_PENDING;
+    entry->percent = 0;
+    entry->error[0] = '\0';
+    return true;
+}
+
 VpItem *vp_catalog_add(VpCatalog *catalog, const VpItem *item) {
     VpItem *existing;
     if (catalog == NULL || item == NULL || item->id[0] == '\0') return NULL;

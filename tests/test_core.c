@@ -626,6 +626,34 @@ static void test_providers_and_transfers(void) {
     assert(!vp_install_homebrew(rom, "ux0:data/vitaplus/x", backend));
 }
 
+static void test_download_queue(void) {
+    VpDownloadQueue queue;
+    VpItem first = make_item("romm:queue-1", "First");
+    VpItem second = make_item("romm:queue-2", "Second");
+    VpDownloadEntry *entry;
+
+    vp_download_queue_init(&queue);
+    assert(vp_download_queue_enqueue(&queue, &first, "ux0:data/first.sfc", "ux0:data/first.sfc.part"));
+    assert(vp_download_queue_enqueue(&queue, &second, "ux0:data/second.sfc", "ux0:data/second.sfc.part"));
+    assert(!vp_download_queue_enqueue(&queue, &first, "ux0:data/first.sfc", "ux0:data/first.sfc.part"));
+
+    entry = vp_download_queue_start_next(&queue);
+    assert(entry != NULL && strcmp(entry->item.id, "romm:queue-1") == 0);
+    vp_download_queue_progress(entry, 50, 200);
+    assert(entry->percent == 25);
+    vp_download_queue_finish(entry, true, NULL);
+    assert(entry->state == VP_DOWNLOAD_COMPLETED && entry->percent == 100);
+
+    entry = vp_download_queue_start_next(&queue);
+    assert(entry != NULL && strcmp(entry->item.id, "romm:queue-2") == 0);
+    vp_download_queue_finish(entry, false, "HTTP 500");
+    assert(entry->state == VP_DOWNLOAD_FAILED);
+    assert(vp_download_queue_retry(&queue, "romm:queue-2"));
+    assert(vp_download_queue_find(&queue, "romm:queue-2")->state == VP_DOWNLOAD_PENDING);
+    assert(vp_download_queue_cancel(&queue, "romm:queue-2"));
+    assert(vp_download_queue_find(&queue, "romm:queue-2")->state == VP_DOWNLOAD_CANCELED);
+}
+
 int main(void) {
     VpItem sample = make_item("local:sample", "Sample");
     assert(strcmp(sample.title, "Sample") == 0);
@@ -646,6 +674,7 @@ int main(void) {
     test_romm_sync_fails_after_partial_page();
     test_homebrew_store_sync();
     test_providers_and_transfers();
+    test_download_queue();
     puts("vitaplus core tests: PASS");
     return 0;
 }
