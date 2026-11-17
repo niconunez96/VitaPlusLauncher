@@ -16,6 +16,9 @@
 
 #define RGBA(r, g, b, a) ((unsigned int)((r) | ((g) << 8) | ((b) << 16) | ((a) << 24)))
 #define VP_CONFIG_PATH "ux0:data/vitaplus/config.ini"
+#define VP_CATALOG_CACHE_PATH "ux0:data/vitaplus/catalog.cache"
+#define VP_CATALOG_CACHE_PARTIAL "ux0:data/vitaplus/catalog.cache.part"
+#define VP_CATALOG_CACHE_VERSION 1U
 
 static VpRommConfig romm_config;
 static VpHomebrewConfig homebrew_config;
@@ -69,6 +72,55 @@ static VpLibraryLevel cached_library_level;
 static char cached_platform[VP_TEXT];
 static bool catalog_view_cache_dirty = true;
 static char unavailable_cover_ids[VP_COVER_SLOTS][VP_TEXT];
+
+static bool save_catalog_cache(const VpCatalog *catalog, const VpRommConfig *config) {
+    static const char magic[] = "VPCAT01";
+    FILE *file;
+    unsigned int version = VP_CATALOG_CACHE_VERSION;
+    bool written;
+    if (catalog == NULL || config == NULL || catalog->count > VP_MAX_ITEMS) return false;
+    (void)sceIoMkdir("ux0:data", 0777);
+    (void)sceIoMkdir("ux0:data/vitaplus", 0777);
+    file = fopen(VP_CATALOG_CACHE_PARTIAL, "wb");
+    if (file == NULL) return false;
+    written = fwrite(magic, 1, sizeof(magic), file) == sizeof(magic) &&
+              fwrite(&version, sizeof(version), 1, file) == 1 &&
+              fwrite(config->base_url, sizeof(config->base_url), 1, file) == 1 &&
+              fwrite(catalog, sizeof(*catalog), 1, file) == 1;
+    if (fclose(file) != 0 || !written) {
+        (void)sceIoRemove(VP_CATALOG_CACHE_PARTIAL);
+        return false;
+    }
+    (void)sceIoRemove(VP_CATALOG_CACHE_PATH);
+    if (sceIoRename(VP_CATALOG_CACHE_PARTIAL, VP_CATALOG_CACHE_PATH) < 0) {
+        (void)sceIoRemove(VP_CATALOG_CACHE_PARTIAL);
+        return false;
+    }
+    return true;
+}
+
+static bool load_catalog_cache(VpApp *app, const VpRommConfig *config) {
+    static const char magic[] = "VPCAT01";
+    static VpCatalog cached_catalog;
+    FILE *file;
+    unsigned int version;
+    char cached_url[VP_URL];
+    bool valid;
+    if (app == NULL || config == NULL || config->base_url[0] == '\0') return false;
+    file = fopen(VP_CATALOG_CACHE_PATH, "rb");
+    if (file == NULL) return false;
+    valid = fread(cached_url, 1, sizeof(magic), file) == sizeof(magic) &&
+            memcmp(cached_url, magic, sizeof(magic)) == 0 &&
+            fread(&version, sizeof(version), 1, file) == 1 &&
+            version == VP_CATALOG_CACHE_VERSION &&
+            fread(cached_url, sizeof(cached_url), 1, file) == 1 &&
+            strcmp(cached_url, config->base_url) == 0 &&
+            fread(&cached_catalog, sizeof(cached_catalog), 1, file) == 1;
+    if (fclose(file) != 0 || !valid || cached_catalog.count > VP_MAX_ITEMS) return false;
+    app->catalog = cached_catalog;
+    catalog_view_cache_dirty = true;
+    return true;
+}
 
 static bool cover_is_unavailable(const char *id) {
     size_t index;
@@ -251,6 +303,7 @@ static void *background_job_run(void *context) {
                         (!romm_requested || succeeded);
         }
         if (!romm_requested && !homebrew_requested) succeeded = false;
+        if (succeeded) (void)save_catalog_cache(&job->catalog, &config);
     } else {
         VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
         const char *target = kind == VP_JOB_DOWNLOAD_ROM ? partial : destination;
@@ -394,6 +447,7 @@ static bool settings_start_ime(void) {
     SceImeDialogParam param;
     const char *value = settings_field == 0 ? romm_config.base_url : romm_pair_code;
     size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_pair_code);
+    if (settings_field > 1) return false;
     settings_text_to_wide(value, settings_ime_buffer, sizeof(settings_ime_buffer) / sizeof(settings_ime_buffer[0]));
     sceImeDialogParamInit(&param);
     param.supportedLanguages = SCE_IME_LANGUAGE_ENGLISH | SCE_IME_LANGUAGE_SPANISH;
@@ -438,10 +492,18 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         return;
     }
     if (settings_section != 0) return;
-    if (pressed & SCE_CTRL_UP) settings_field = 0;
-    if (pressed & SCE_CTRL_DOWN) settings_field = 1;
-    if (pressed & SCE_CTRL_CROSS && !settings_start_ime())
-        (void)snprintf(app->notice, sizeof(app->notice), "No se pudo abrir el teclado de PS Vita");
+    if (pressed & SCE_CTRL_UP) settings_field = (settings_field + 2) % 3;
+    if (pressed & SCE_CTRL_DOWN) settings_field = (settings_field + 1) % 3;
+    if (pressed & SCE_CTRL_CROSS) {
+        if (settings_field == 2) {
+            if (sync_romm_catalog(app))
+                (void)snprintf(app->notice, sizeof(app->notice), "Sincronizacion iniciada en segundo plano");
+            else
+                (void)snprintf(app->notice, sizeof(app->notice), "No se pudo iniciar la sincronizacion");
+        } else if (!settings_start_ime()) {
+            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo abrir el teclado de PS Vita");
+        }
+    }
     if (pressed & SCE_CTRL_TRIANGLE) {
         if (romm_pair_code[0] != '\0') {
             if (background_job_start(VP_JOB_PAIR_AND_SYNC, NULL, NULL, NULL))
@@ -932,6 +994,7 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
         {
             const char *url_prefix = settings_field == 0 ? "> " : "  ";
             const char *pair_prefix = settings_field == 1 ? "> " : "  ";
+            const char *sync_prefix = settings_field == 2 ? "> " : "  ";
             vita2d_pgf_draw_text(font, 42, 175, text, 0.82f, "RomM");
             vita2d_pgf_draw_textf(font, 42, 218, settings_field == 0 ? accent : text, 0.68f,
                                   "%sURL: %s", url_prefix,
@@ -939,9 +1002,11 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
             vita2d_pgf_draw_textf(font, 42, 258, settings_field == 1 ? accent : text, 0.68f,
                                   "%sPair code: %s", pair_prefix,
                                   romm_pair_code[0] != '\0' ? romm_pair_code : "(ingresa el codigo de 8 caracteres)");
-            vita2d_pgf_draw_text(font, 42, 314, muted, 0.58f,
-                                 "Arriba/Abajo campo | X abre teclado | Triangulo canjea, guarda y sincroniza");
+            vita2d_pgf_draw_textf(font, 42, 298, settings_field == 2 ? accent : text, 0.68f,
+                                  "%sSincronizar ahora", sync_prefix);
             vita2d_pgf_draw_text(font, 42, 342, muted, 0.58f,
+                                 "Arriba/Abajo campo | X edita o sincroniza | Triangulo canjea y guarda");
+            vita2d_pgf_draw_text(font, 42, 370, muted, 0.58f,
                                  "Circulo vuelve a Ajustes; el codigo se canjea una vez y no se guarda");
             if (app->notice[0] != '\0') vita2d_pgf_draw_text(font, 42, 410, RGBA(245, 174, 79, 255), 0.62f, app->notice);
         }
@@ -1005,13 +1070,13 @@ int main(void) {
     (void)sceIoMkdir("ux0:data/vitaplus/cache/covers", 0777);
     (void)sceIoMkdir("ux0:data/vitaplus/downloads", 0777);
     load_providers(&app);
+    if (load_catalog_cache(&app, &romm_config))
+        (void)snprintf(app.notice, sizeof(app.notice), "Biblioteca cargada desde cache");
     refresh_downloaded_items(&app);
     vita2d_init();
     font = vita2d_load_default_pgf();
     (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
-    if (sync_romm_catalog(&app))
-        (void)snprintf(app.notice, sizeof(app.notice), "Sincronizando biblioteca en segundo plano");
     for (;;) {
         unsigned int pressed;
         if (settings_ime_active) {
