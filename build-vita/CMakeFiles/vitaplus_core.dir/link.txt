@@ -1,0 +1,2 @@
+/home/hermes/.local/vitasdk/bin/arm-vita-eabi-ar qc libvitaplus_core.a CMakeFiles/vitaplus_core.dir/src/core/vitaplus.c.obj
+/home/hermes/.local/vitasdk/bin/arm-vita-eabi-ranlib libvitaplus_core.a

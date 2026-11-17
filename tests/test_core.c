@@ -91,11 +91,18 @@ static void test_shell_catalog(void) {
 
     vp_app_init(&app);
     assert(app.active_view == VP_VIEW_GRID);
-    assert(app.active_screen == VP_SCREEN_HOME);
+    assert(app.active_screen == VP_SCREEN_LIBRARY);
+    assert(strcmp(vp_screen_name(VP_SCREEN_LIBRARY), "Biblioteca") == 0);
+    assert(strcmp(vp_screen_name(VP_SCREEN_STORES), "Tiendas") == 0);
+    assert(strcmp(vp_screen_name(VP_SCREEN_SETTINGS), "Ajustes") == 0);
     vp_app_cycle_screen(&app, -1);
     assert(app.active_screen == VP_SCREEN_SETTINGS);
     vp_app_cycle_screen(&app, 1);
-    assert(app.active_screen == VP_SCREEN_HOME);
+    assert(app.active_screen == VP_SCREEN_LIBRARY);
+    vp_app_cycle_screen(&app, 1);
+    assert(app.active_screen == VP_SCREEN_STORES);
+    vp_app_cycle_screen(&app, 1);
+    assert(app.active_screen == VP_SCREEN_SETTINGS);
     vp_app_cycle_view(&app);
     assert(app.active_view == VP_VIEW_LIST);
     assert(vp_catalog_add(&app.catalog, &(VpItem){0}) == NULL);

@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/hermes/development/vitaplus/build-vita/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

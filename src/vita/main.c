@@ -21,7 +21,9 @@ static VpApp app;
 static VpCatalog romm_catalog;
 static char active_theme[VP_TEXT] = "default";
 static char romm_pair_code[VP_TEXT];
+static int settings_section;
 static int settings_field;
+static bool settings_detail_active;
 static bool settings_ime_active;
 static SceWChar16 settings_ime_buffer[VP_URL];
 
@@ -167,6 +169,17 @@ static void settings_finish_ime(VpApp *app) {
 }
 
 static void handle_settings_input(VpApp *app, unsigned int pressed) {
+    if (!settings_detail_active) {
+        if (pressed & SCE_CTRL_UP) settings_section = 0;
+        if (pressed & SCE_CTRL_DOWN) settings_section = 1;
+        if (pressed & SCE_CTRL_CROSS) settings_detail_active = true;
+        return;
+    }
+    if (pressed & SCE_CTRL_CIRCLE) {
+        settings_detail_active = false;
+        return;
+    }
+    if (settings_section != 0) return;
     if (pressed & SCE_CTRL_UP) settings_field = 0;
     if (pressed & SCE_CTRL_DOWN) settings_field = 1;
     if (pressed & SCE_CTRL_CROSS && !settings_start_ime())
@@ -282,20 +295,38 @@ static void draw_shell(vita2d_pgf *font, const VpApp *app) {
     vita2d_pgf_draw_text(font, 28, 112, accent, 1.0f, vp_screen_name(app->active_screen));
     vita2d_pgf_draw_text(font, 734, 112, muted, 0.8f, vp_view_name(app->active_view));
     if (app->active_screen == VP_SCREEN_SETTINGS) {
-        const char *url_prefix = settings_field == 0 ? "> " : "  ";
-        const char *pair_prefix = settings_field == 1 ? "> " : "  ";
-        vita2d_pgf_draw_text(font, 42, 175, text, 0.82f, "RomM server");
-        vita2d_pgf_draw_textf(font, 42, 218, settings_field == 0 ? accent : text, 0.68f,
-                              "%sURL: %s", url_prefix,
-                              romm_config.base_url[0] != '\0' ? romm_config.base_url : "(sin configurar)");
-        vita2d_pgf_draw_textf(font, 42, 258, settings_field == 1 ? accent : text, 0.68f,
-                              "%sPair code: %s", pair_prefix,
-                              romm_pair_code[0] != '\0' ? romm_pair_code : "(ingresa el codigo de 8 caracteres)");
-        vita2d_pgf_draw_text(font, 42, 314, muted, 0.58f,
-                             "Arriba/Abajo campo | X abre teclado PS Vita | Triangulo canjea, guarda y sincroniza");
-        vita2d_pgf_draw_text(font, 42, 342, muted, 0.58f,
-                             "Crea Pair Device en RomM; el codigo se canjea una vez y no se guarda");
-        if (app->notice[0] != '\0') vita2d_pgf_draw_text(font, 42, 410, RGBA(245, 174, 79, 255), 0.62f, app->notice);
+        if (!settings_detail_active) {
+            vita2d_pgf_draw_textf(font, 42, 185, settings_section == 0 ? accent : text, 0.82f,
+                                  "%sRomM", settings_section == 0 ? "> " : "  ");
+            vita2d_pgf_draw_textf(font, 42, 235, settings_section == 1 ? accent : text, 0.82f,
+                                  "%sTemas", settings_section == 1 ? "> " : "  ");
+            vita2d_pgf_draw_text(font, 42, 290, muted, 0.58f, "Arriba/Abajo selecciona | X abre");
+            return;
+        }
+        if (settings_section == 1) {
+            vita2d_pgf_draw_text(font, 42, 175, text, 0.82f, "Temas");
+            vita2d_pgf_draw_textf(font, 42, 218, text, 0.68f, "Tema activo: %s", active_theme);
+            vita2d_pgf_draw_text(font, 42, 270, muted, 0.58f,
+                                 "Instala temas en ux0:data/vitaplus/themes/<tema>/theme.ini");
+            vita2d_pgf_draw_text(font, 42, 298, muted, 0.58f, "Circulo vuelve a Ajustes");
+            return;
+        }
+        {
+            const char *url_prefix = settings_field == 0 ? "> " : "  ";
+            const char *pair_prefix = settings_field == 1 ? "> " : "  ";
+            vita2d_pgf_draw_text(font, 42, 175, text, 0.82f, "RomM");
+            vita2d_pgf_draw_textf(font, 42, 218, settings_field == 0 ? accent : text, 0.68f,
+                                  "%sURL: %s", url_prefix,
+                                  romm_config.base_url[0] != '\0' ? romm_config.base_url : "(sin configurar)");
+            vita2d_pgf_draw_textf(font, 42, 258, settings_field == 1 ? accent : text, 0.68f,
+                                  "%sPair code: %s", pair_prefix,
+                                  romm_pair_code[0] != '\0' ? romm_pair_code : "(ingresa el codigo de 8 caracteres)");
+            vita2d_pgf_draw_text(font, 42, 314, muted, 0.58f,
+                                 "Arriba/Abajo campo | X abre teclado | Triangulo canjea, guarda y sincroniza");
+            vita2d_pgf_draw_text(font, 42, 342, muted, 0.58f,
+                                 "Circulo vuelve a Ajustes; el codigo se canjea una vez y no se guarda");
+            if (app->notice[0] != '\0') vita2d_pgf_draw_text(font, 42, 410, RGBA(245, 174, 79, 255), 0.62f, app->notice);
+        }
         return;
     }
     if (app->catalog.count == 0) {
@@ -318,13 +349,8 @@ int main(void) {
     SceCtrlData pad;
     unsigned int previous = 0;
     vita2d_pgf *font;
-    const char *local_manifest =
-        "pcse00120|Persona 4 Golden|PS Vita|PCSE00120\n"
-        "snes-smw|Super Mario World|SNES|ux0:data/roms/snes/smw.sfc\n"
-        "psp-patapon|Patapon|PSP|ux0:pspemu/ISO/Patapon.iso\n";
     vp_app_init(&app);
     if (setenv("OPENSSL_CONF", "app0:openssl.cnf", 1) != 0) return 1;
-    (void)vp_local_import_manifest(&app.catalog, local_manifest);
     load_providers(&app);
     vita2d_init();
     font = vita2d_load_default_pgf();
@@ -346,8 +372,10 @@ int main(void) {
         if (pressed & SCE_CTRL_START) break;
         if (app.active_screen == VP_SCREEN_SETTINGS) {
             handle_settings_input(&app, pressed);
-            if (!settings_ime_active && (pressed & SCE_CTRL_LTRIGGER)) vp_app_cycle_screen(&app, -1);
-            if (!settings_ime_active && (pressed & SCE_CTRL_RTRIGGER)) vp_app_cycle_screen(&app, 1);
+            if (!settings_ime_active && !settings_detail_active && (pressed & SCE_CTRL_LTRIGGER))
+                vp_app_cycle_screen(&app, -1);
+            if (!settings_ime_active && !settings_detail_active && (pressed & SCE_CTRL_RTRIGGER))
+                vp_app_cycle_screen(&app, 1);
         } else {
             if (pressed & SCE_CTRL_LTRIGGER) vp_app_cycle_screen(&app, -1);
             if (pressed & SCE_CTRL_RTRIGGER) vp_app_cycle_screen(&app, 1);

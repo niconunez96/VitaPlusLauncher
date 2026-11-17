@@ -31,10 +31,8 @@ typedef enum {
 } VpView;
 
 typedef enum {
-    VP_SCREEN_HOME,
     VP_SCREEN_LIBRARY,
     VP_SCREEN_STORES,
-    VP_SCREEN_THEMES,
     VP_SCREEN_SETTINGS
 } VpScreen;
 

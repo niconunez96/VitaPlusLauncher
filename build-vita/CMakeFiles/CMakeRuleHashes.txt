@@ -1,0 +1,7 @@
+# Hashes of file build rules.
+89c03e1a06381f668cb830b401d90039 CMakeFiles/eboot.bin-self
+2f1537404d7ce73b581a59fa3369019d CMakeFiles/vitaplus-velf
+356cc14d900f07fb9a3d066fe55d2eba CMakeFiles/vitaplus.vpk-vpk
+461836ef4ebfbfcd0a64f236651a0627 eboot.bin.out
+de17d5b705a4a6f670ac29decce65915 vitaplus.vpk.out
+15788a1a07e413594312445650fe9850 vitaplus.vpk_param.sfo

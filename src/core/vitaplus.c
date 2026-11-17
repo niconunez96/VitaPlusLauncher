@@ -198,18 +198,16 @@ void vp_app_init(VpApp *app) {
     app->theme.card_width = 154;
     app->theme.card_height = 216;
     app->active_view = VP_VIEW_GRID;
-    app->active_screen = VP_SCREEN_HOME;
+    app->active_screen = VP_SCREEN_LIBRARY;
     app->selected_item = 0;
 }
 
 const char *vp_screen_name(VpScreen screen) {
     switch (screen) {
-        case VP_SCREEN_HOME: return "Inicio";
         case VP_SCREEN_LIBRARY: return "Biblioteca";
         case VP_SCREEN_STORES: return "Tiendas";
-        case VP_SCREEN_THEMES: return "Temas";
         case VP_SCREEN_SETTINGS: return "Ajustes";
-        default: return "Inicio";
+        default: return "Biblioteca";
     }
 }
 
@@ -217,8 +215,8 @@ void vp_app_cycle_screen(VpApp *app, int direction) {
     int value;
     if (app == NULL || direction == 0) return;
     value = (int)app->active_screen + (direction > 0 ? 1 : -1);
-    if (value < (int)VP_SCREEN_HOME) value = (int)VP_SCREEN_SETTINGS;
-    if (value > (int)VP_SCREEN_SETTINGS) value = (int)VP_SCREEN_HOME;
+    if (value < (int)VP_SCREEN_LIBRARY) value = (int)VP_SCREEN_SETTINGS;
+    if (value > (int)VP_SCREEN_SETTINGS) value = (int)VP_SCREEN_LIBRARY;
     app->active_screen = (VpScreen)value;
 }
 
