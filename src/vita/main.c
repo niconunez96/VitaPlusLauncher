@@ -6,6 +6,7 @@
 #include <psp2/sysmodule.h>
 #include <vita2d.h>
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +21,6 @@ static VpRommConfig romm_config;
 static VpHomebrewConfig homebrew_config;
 static VpLaunchConfig launch_config;
 static VpApp app;
-static VpCatalog romm_catalog;
 static char active_theme[VP_TEXT] = "default";
 static char romm_pair_code[VP_TEXT];
 static int settings_section;
@@ -28,6 +28,45 @@ static int settings_field;
 static bool settings_detail_active;
 static bool settings_ime_active;
 static SceWChar16 settings_ime_buffer[VP_URL];
+
+typedef enum {
+    VP_JOB_NONE,
+    VP_JOB_SYNC_PROVIDERS,
+    VP_JOB_PAIR_AND_SYNC,
+    VP_JOB_DOWNLOAD_ROM,
+    VP_JOB_INSTALL_HOMEBREW,
+    VP_JOB_FETCH_COVER
+} VpJobKind;
+
+typedef struct {
+    pthread_t thread;
+    pthread_mutex_t mutex;
+    bool active;
+    bool completed;
+    bool succeeded;
+    VpJobKind kind;
+    VpRommConfig romm;
+    VpHomebrewConfig homebrew;
+    VpItem item;
+    VpCatalog catalog;
+    char destination[VP_PATH];
+    char partial[VP_PATH + 8];
+    char pair_code[VP_TEXT];
+    char error[VP_TEXT];
+} VpBackgroundJob;
+
+/* The core fetch buffer and backend diagnostics are deliberately single-owner. One worker keeps
+ * all network/disk work off the UI thread without making those shared resources concurrent. */
+static VpBackgroundJob background_job = {
+    .mutex = PTHREAD_MUTEX_INITIALIZER
+};
+static VpPlatformGroup platform_groups[VP_MAX_PLATFORMS];
+static size_t visible_indexes[VP_MAX_ITEMS];
+static size_t platform_group_count;
+static size_t visible_count_cache;
+static VpLibraryLevel cached_library_level;
+static char cached_platform[VP_TEXT];
+static bool catalog_view_cache_dirty = true;
 
 static void trim(char *value) {
     size_t length;
@@ -59,7 +98,6 @@ static void load_theme_file(VpApp *app, const char *path) {
 
 static void load_providers(VpApp *app) {
     FILE *file = fopen(VP_CONFIG_PATH, "r");
-    VpFetchBackend fetch_backend = {vp_vita_fetch, NULL};
     char line[512];
     load_theme_file(app, "app0:assets/default/theme.ini");
     if (file == NULL) return;
@@ -84,10 +122,6 @@ static void load_providers(VpApp *app) {
         (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/themes/%s/theme.ini", active_theme);
         load_theme_file(app, path);
     }
-    if (romm_config.base_url[0] != '\0' && romm_config.token[0] != '\0')
-        (void)vp_romm_sync(&app->catalog, &romm_config, fetch_backend);
-    if (homebrew_config.catalog_url[0] != '\0')
-        (void)vp_homebrew_sync(&app->catalog, &homebrew_config, fetch_backend);
 }
 
 static bool save_romm_config(void) {
@@ -133,29 +167,182 @@ static void refresh_downloaded_items(VpApp *app) {
     }
 }
 
-static bool sync_romm_catalog(VpApp *app) {
-    VpFetchBackend fetch_backend = {vp_vita_fetch, NULL};
+static void apply_provider_catalog(VpApp *app, const VpCatalog *catalog) {
     size_t index = 0;
-    if (app == NULL || romm_config.base_url[0] == '\0' || romm_config.token[0] == '\0') return false;
-    vp_catalog_init(&romm_catalog);
-    if (!vp_romm_sync(&romm_catalog, &romm_config, fetch_backend)) return false;
+    if (app == NULL || catalog == NULL) return;
     while (index < app->catalog.count) {
-        if (app->catalog.items[index].source == VP_SOURCE_ROMM) {
+        if (app->catalog.items[index].source == VP_SOURCE_ROMM ||
+            app->catalog.items[index].source == VP_SOURCE_HOMEBREW) {
             app->catalog.items[index] = app->catalog.items[app->catalog.count - 1];
             app->catalog.count--;
         } else {
             index++;
         }
     }
-    for (index = 0; index < romm_catalog.count; index++) {
-        if (vp_catalog_add(&app->catalog, &romm_catalog.items[index]) == NULL) return false;
-    }
+    for (index = 0; index < catalog->count; index++)
+        (void)vp_catalog_add(&app->catalog, &catalog->items[index]);
     app->library_level = VP_LEVEL_PLATFORMS;
     app->active_platform[0] = '\0';
     app->selected_platform = 0;
     app->selected_item = 0;
     refresh_downloaded_items(app);
-    return true;
+    catalog_view_cache_dirty = true;
+}
+
+static void *background_job_run(void *context) {
+    VpBackgroundJob *job = context;
+    VpJobKind kind;
+    VpRommConfig config;
+    VpHomebrewConfig homebrew;
+    VpItem item;
+    char pair_code[VP_TEXT];
+    char destination[VP_PATH];
+    char partial[VP_PATH + 8];
+    bool succeeded = false;
+    char error[VP_TEXT];
+
+    pthread_mutex_lock(&job->mutex);
+    kind = job->kind;
+    config = job->romm;
+    homebrew = job->homebrew;
+    item = job->item;
+    (void)snprintf(destination, sizeof(destination), "%s", job->destination);
+    (void)snprintf(partial, sizeof(partial), "%s", job->partial);
+    (void)snprintf(pair_code, sizeof(pair_code), "%s", job->pair_code);
+    pthread_mutex_unlock(&job->mutex);
+
+    if (kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC) {
+        VpFetchBackend fetch_backend = {vp_vita_fetch, NULL};
+        vp_catalog_init(&job->catalog);
+        if (kind == VP_JOB_PAIR_AND_SYNC) {
+            VpRommPairBackend pair_backend = {vp_vita_exchange_pair_code, NULL};
+            succeeded = vp_romm_exchange_pair_code(&config, pair_code, pair_backend);
+            if (!succeeded) goto finish;
+            succeeded = vp_romm_sync(&job->catalog, &config, fetch_backend);
+        } else if (config.base_url[0] != '\0' && config.token[0] != '\0') {
+            succeeded = vp_romm_sync(&job->catalog, &config, fetch_backend);
+        }
+        if (homebrew.catalog_url[0] != '\0')
+            succeeded = vp_homebrew_sync(&job->catalog, &homebrew, fetch_backend) || succeeded;
+    } else {
+        VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
+        const char *target = kind == VP_JOB_DOWNLOAD_ROM ? partial : destination;
+        if (kind == VP_JOB_INSTALL_HOMEBREW)
+            succeeded = vp_install_homebrew(&item, target, transfer_backend);
+        else if (kind == VP_JOB_FETCH_COVER)
+            succeeded = vp_cache_cover(&item, &config, target, transfer_backend);
+        else
+            succeeded = vp_queue_download(&item, &config, target, transfer_backend);
+        if (succeeded && kind == VP_JOB_DOWNLOAD_ROM) {
+            succeeded = sceIoRename(partial, destination) >= 0;
+            if (!succeeded) (void)sceIoRemove(partial);
+        }
+    }
+finish:
+    (void)snprintf(error, sizeof(error), "%s", succeeded ? "" : vp_vita_last_error());
+
+    pthread_mutex_lock(&job->mutex);
+    if ((kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC) && succeeded) {
+        job->romm = config;
+    }
+    job->succeeded = succeeded;
+    (void)snprintf(job->error, sizeof(job->error), "%s", error);
+    job->completed = true;
+    pthread_mutex_unlock(&job->mutex);
+    return NULL;
+}
+
+static bool background_job_start(VpJobKind kind, const VpItem *item, const char *destination,
+                                 const char *partial) {
+    int result;
+    pthread_mutex_lock(&background_job.mutex);
+    if (background_job.active) {
+        pthread_mutex_unlock(&background_job.mutex);
+        return false;
+    }
+    background_job.kind = kind;
+    background_job.completed = false;
+    background_job.succeeded = false;
+    background_job.error[0] = '\0';
+    background_job.romm = romm_config;
+    background_job.homebrew = homebrew_config;
+    (void)snprintf(background_job.pair_code, sizeof(background_job.pair_code), "%s", romm_pair_code);
+    memset(&background_job.item, 0, sizeof(background_job.item));
+    if (item != NULL) background_job.item = *item;
+    (void)snprintf(background_job.destination, sizeof(background_job.destination), "%s",
+                   destination != NULL ? destination : "");
+    (void)snprintf(background_job.partial, sizeof(background_job.partial), "%s",
+                   partial != NULL ? partial : "");
+    background_job.active = true;
+    result = pthread_create(&background_job.thread, NULL, background_job_run, &background_job);
+    if (result != 0) background_job.active = false;
+    pthread_mutex_unlock(&background_job.mutex);
+    return result == 0;
+}
+
+static void background_job_poll(VpApp *app) {
+    VpJobKind kind;
+    VpItem item;
+    VpRommConfig config;
+    char destination[VP_PATH];
+    char error[VP_TEXT];
+    bool succeeded;
+
+    pthread_mutex_lock(&background_job.mutex);
+    if (!background_job.active || !background_job.completed) {
+        pthread_mutex_unlock(&background_job.mutex);
+        return;
+    }
+    kind = background_job.kind;
+    succeeded = background_job.succeeded;
+    item = background_job.item;
+    config = background_job.romm;
+    (void)snprintf(destination, sizeof(destination), "%s", background_job.destination);
+    (void)snprintf(error, sizeof(error), "%s", background_job.error);
+    pthread_mutex_unlock(&background_job.mutex);
+
+    (void)pthread_join(background_job.thread, NULL);
+    pthread_mutex_lock(&background_job.mutex);
+    background_job.active = false;
+    background_job.kind = VP_JOB_NONE;
+    pthread_mutex_unlock(&background_job.mutex);
+
+    if (!succeeded) {
+        (void)snprintf(app->notice, sizeof(app->notice), "Operacion fallida: %.140s", error);
+        return;
+    }
+    if (kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC) {
+        if (kind == VP_JOB_PAIR_AND_SYNC) {
+            romm_config = config;
+            memset(romm_pair_code, 0, sizeof(romm_pair_code));
+            if (!save_romm_config()) {
+                (void)snprintf(app->notice, sizeof(app->notice), "Sincronizado, pero no se pudo guardar la configuracion");
+                return;
+            }
+        }
+        apply_provider_catalog(app, &background_job.catalog);
+        (void)snprintf(app->notice, sizeof(app->notice), "Biblioteca sincronizada: %u juegos",
+                       (unsigned)app->catalog.count);
+    } else if (kind == VP_JOB_DOWNLOAD_ROM) {
+        VpItem *completed = vp_catalog_find(&app->catalog, item.id);
+        if (completed != NULL) {
+            completed->installed = true;
+            (void)snprintf(completed->launch_target, sizeof(completed->launch_target), "%s",
+                           destination);
+        }
+        (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada; presiona X para jugar");
+    } else if (kind == VP_JOB_INSTALL_HOMEBREW) {
+        VpItem *completed = vp_catalog_find(&app->catalog, item.id);
+        if (completed != NULL) completed->installed = true;
+        (void)snprintf(app->notice, sizeof(app->notice), "Instalacion finalizada; revisa LiveArea");
+    }
+}
+
+static bool sync_romm_catalog(VpApp *app) {
+    (void)app;
+    if ((romm_config.base_url[0] == '\0' || romm_config.token[0] == '\0') &&
+        homebrew_config.catalog_url[0] == '\0') return false;
+    return background_job_start(VP_JOB_SYNC_PROVIDERS, NULL, NULL, NULL);
 }
 
 static void settings_text_to_wide(const char *source, SceWChar16 *destination, size_t capacity) {
@@ -225,18 +412,17 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
     if (pressed & SCE_CTRL_CROSS && !settings_start_ime())
         (void)snprintf(app->notice, sizeof(app->notice), "No se pudo abrir el teclado de PS Vita");
     if (pressed & SCE_CTRL_TRIANGLE) {
-        VpRommPairBackend pair_backend = {vp_vita_exchange_pair_code, NULL};
-        if (romm_pair_code[0] != '\0' &&
-            !vp_romm_exchange_pair_code(&romm_config, romm_pair_code, pair_backend)) {
-            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo canjear el pair code de RomM");
+        if (romm_pair_code[0] != '\0') {
+            if (background_job_start(VP_JOB_PAIR_AND_SYNC, NULL, NULL, NULL))
+                (void)snprintf(app->notice, sizeof(app->notice), "Canjeando y sincronizando en segundo plano");
+            else
+                (void)snprintf(app->notice, sizeof(app->notice), "Hay una operacion en curso; espera a que termine");
         } else if (!save_romm_config()) {
             (void)snprintf(app->notice, sizeof(app->notice), "No se pudo guardar la configuracion");
+        } else if (sync_romm_catalog(app)) {
+            (void)snprintf(app->notice, sizeof(app->notice), "Sincronizacion iniciada en segundo plano");
         } else {
-            memset(romm_pair_code, 0, sizeof(romm_pair_code));
-            if (sync_romm_catalog(app))
-                (void)snprintf(app->notice, sizeof(app->notice), "RomM sincronizado: %u juegos", (unsigned)app->catalog.count);
-            else
-                (void)snprintf(app->notice, sizeof(app->notice), "No se pudo sincronizar: %.96s; revisa network.log", vp_vita_last_error());
+            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo iniciar la sincronizacion");
         }
     }
 }
@@ -250,9 +436,28 @@ typedef struct {
 #define VP_COVER_SLOTS 8
 
 static VpCoverSlot cover_slots[VP_COVER_SLOTS];
-static VpPlatformGroup platform_groups[VP_MAX_PLATFORMS];
-static size_t visible_indexes[VP_MAX_ITEMS];
 static size_t cover_indexes[VP_COVER_SLOTS];
+
+static void refresh_catalog_view_cache(VpApp *app) {
+    if (app == NULL) return;
+    if (app->library_level == VP_LEVEL_PLATFORMS) {
+        if (catalog_view_cache_dirty || cached_library_level != VP_LEVEL_PLATFORMS) {
+            platform_group_count = vp_catalog_platforms(&app->catalog, platform_groups,
+                                                        VP_MAX_PLATFORMS);
+            cached_library_level = VP_LEVEL_PLATFORMS;
+            cached_platform[0] = '\0';
+            catalog_view_cache_dirty = false;
+        }
+        return;
+    }
+    if (catalog_view_cache_dirty || cached_library_level != VP_LEVEL_ROMS ||
+        strcmp(cached_platform, app->active_platform) != 0) {
+        visible_count_cache = vp_app_visible(app, visible_indexes, VP_MAX_ITEMS);
+        cached_library_level = VP_LEVEL_ROMS;
+        (void)snprintf(cached_platform, sizeof(cached_platform), "%s", app->active_platform);
+        catalog_view_cache_dirty = false;
+    }
+}
 
 static void safe_id(const char *id, char *destination, size_t capacity) {
     size_t index;
@@ -339,7 +544,6 @@ static vita2d_texture *load_texture_file(const char *path) {
 }
 
 static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
-    VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
     size_t index;
     if (count > VP_COVER_SLOTS) count = VP_COVER_SLOTS;
     for (index = 0; index < count; index++) {
@@ -351,21 +555,22 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
         FILE *file;
         if (!vp_libretro_thumbnail_url(item, thumbnail_url, sizeof(thumbnail_url))) continue;
         if (find_cover_slot(item->id) != NULL) continue;
-        slot = acquire_slot(item->id, indexes, count);
-        if (slot == NULL) return;
         thumbnail_item = *item;
         (void)snprintf(thumbnail_item.cover_url, sizeof(thumbnail_item.cover_url), "%s", thumbnail_url);
         cover_path_for(item->id, path, sizeof(path));
         file = fopen(path, "rb");
         if (file != NULL) {
             fclose(file);
-        } else if (!vp_cache_cover(&thumbnail_item, &romm_config, path, transfer_backend)) {
+            slot = acquire_slot(item->id, indexes, count);
+            if (slot == NULL) return;
+            slot->texture = load_texture_file(path);
+            if (slot->texture == NULL) (void)sceIoRemove(path);
             slot->attempted = true;
+            return;
+        }
+        if (!background_job_start(VP_JOB_FETCH_COVER, &thumbnail_item, path, NULL)) {
             continue;
         }
-        slot->texture = load_texture_file(path);
-        if (slot->texture == NULL) (void)sceIoRemove(path);
-        slot->attempted = true;
         return;
     }
 }
@@ -530,7 +735,6 @@ static void draw_download_badge(int x, int y, bool installed, unsigned int accen
 
 static void activate_selected(VpApp *app) {
     VpItem *item;
-    VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
     if (app->catalog.count == 0 || app->selected_item >= app->catalog.count) return;
     item = &app->catalog.items[app->selected_item];
     if (item->source == VP_SOURCE_HOMEBREW) {
@@ -543,12 +747,10 @@ static void activate_selected(VpApp *app) {
             return;
         }
         (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/downloads/%s.vpk", destination);
-        if (vp_install_homebrew(item, path, transfer_backend)) {
-            item->installed = true;
-            (void)snprintf(app->notice, sizeof(app->notice), "Instalacion finalizada; revisa LiveArea");
-        } else {
-            (void)snprintf(app->notice, sizeof(app->notice), "Fallo la instalacion; revisa la red y el archivo");
-        }
+        if (background_job_start(VP_JOB_INSTALL_HOMEBREW, item, path, NULL))
+            (void)snprintf(app->notice, sizeof(app->notice), "Instalando %.110s en segundo plano", item->title);
+        else
+            (void)snprintf(app->notice, sizeof(app->notice), "Hay una operacion en curso; espera a que termine");
         app->installation_armed = false;
         return;
     }
@@ -592,18 +794,10 @@ static void activate_selected(VpApp *app) {
             return;
         }
         (void)snprintf(partial, sizeof(partial), "%s.part", path);
-        if (!vp_queue_download(item, &romm_config, partial, transfer_backend)) {
-            (void)snprintf(app->notice, sizeof(app->notice), "Fallo la descarga: %.110s", vp_vita_last_error());
-            return;
-        }
-        if (sceIoRename(partial, path) < 0) {
-            (void)sceIoRemove(partial);
-            (void)snprintf(app->notice, sizeof(app->notice), "Descarga completa pero no se pudo guardar el archivo");
-            return;
-        }
-        item->installed = true;
-        (void)snprintf(item->launch_target, sizeof(item->launch_target), "%s", path);
-        (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada; presiona X para jugar");
+        if (background_job_start(VP_JOB_DOWNLOAD_ROM, item, path, partial))
+            (void)snprintf(app->notice, sizeof(app->notice), "Descargando %.110s en segundo plano", item->title);
+        else
+            (void)snprintf(app->notice, sizeof(app->notice), "Hay una operacion en curso; espera a que termine");
         return;
     }
     (void)snprintf(app->notice, sizeof(app->notice), "Este elemento no tiene un archivo ejecutable");
@@ -632,13 +826,14 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
     size_t index;
 
     if (app->active_screen == VP_SCREEN_LIBRARY) {
+        refresh_catalog_view_cache(app);
         if (app->library_level == VP_LEVEL_PLATFORMS) {
-            group_count = vp_catalog_platforms(&app->catalog, platform_groups, VP_MAX_PLATFORMS);
+            group_count = platform_group_count;
             if (group_count > 0 && app->selected_platform >= group_count)
                 app->selected_platform = group_count - 1;
             if (group_count > 0) selected_group = &platform_groups[app->selected_platform];
         } else {
-            visible_count = vp_app_visible(app, visible_indexes, VP_MAX_ITEMS);
+            visible_count = visible_count_cache;
             if (visible_count > 0) selected = &app->catalog.items[app->selected_item];
         }
     }
@@ -785,6 +980,8 @@ int main(void) {
     font = vita2d_load_default_pgf();
     (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
+    if (sync_romm_catalog(&app))
+        (void)snprintf(app.notice, sizeof(app.notice), "Sincronizando biblioteca en segundo plano");
     for (;;) {
         unsigned int pressed;
         if (settings_ime_active) {
@@ -795,6 +992,7 @@ int main(void) {
                 continue;
             }
         }
+        background_job_poll(&app);
         sceCtrlPeekBufferPositive(0, &pad, 1);
         pressed = pad.buttons & ~previous;
         previous = pad.buttons;

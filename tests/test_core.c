@@ -256,14 +256,15 @@ static void test_download_paths(void) {
     memset(&item, 0, sizeof(item));
     item.source = VP_SOURCE_ROMM;
     (void)snprintf(item.id, sizeof(item.id), "%s", "romm:42");
+    (void)snprintf(item.platform, sizeof(item.platform), "%s", "snes");
     (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "Super Metroid (USA).sfc");
 
     assert(vp_item_extension(&item, extension, sizeof(extension)));
     assert(strcmp(extension, "sfc") == 0);
     assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
-    assert(strcmp(path, "ux0:data/vitaplus/downloads/romm_42.sfc") == 0);
+    assert(strcmp(path, "ux0:data/vitaplus/downloads/snes/romm_42.sfc") == 0);
     assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads/", path, sizeof(path)));
-    assert(strcmp(path, "ux0:data/vitaplus/downloads/romm_42.sfc") == 0);
+    assert(strcmp(path, "ux0:data/vitaplus/downloads/snes/romm_42.sfc") == 0);
 
     /* RomM does not always expose fs_name; the content URL still carries the extension. */
     item.fs_name[0] = '\0';
@@ -272,7 +273,11 @@ static void test_download_paths(void) {
     assert(vp_item_extension(&item, extension, sizeof(extension)));
     assert(strcmp(extension, "zip") == 0);
     assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
-    assert(strcmp(path, "ux0:data/vitaplus/downloads/romm_42.zip") == 0);
+    assert(strcmp(path, "ux0:data/vitaplus/downloads/snes/romm_42.zip") == 0);
+
+    (void)snprintf(item.platform, sizeof(item.platform), "%s", "Mega Drive / Genesis");
+    assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitaplus/downloads/Mega_Drive___Genesis/romm_42.zip") == 0);
 
     (void)snprintf(item.download_url, sizeof(item.download_url), "%s",
                    "https://romm.local/api/roms/42/content/7");
@@ -347,7 +352,7 @@ static void test_romm_content_download(void) {
     assert(strcmp(transfer_log.url,
                   "http://romm.local/api/roms/42/content/Super Metroid (USA).sfc") == 0);
     assert(strcmp(transfer_log.destination,
-                  "ux0:data/vitaplus/downloads/romm_42.sfc") == 0);
+                   "ux0:data/vitaplus/downloads/snes/romm_42.sfc") == 0);
     assert(strcmp(transfer_log.bearer, "rmm_test_token") == 0);
     assert(!item->multi_file);
 

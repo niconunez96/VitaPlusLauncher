@@ -335,8 +335,9 @@ bool vp_item_extension(const VpItem *item, char *destination, size_t capacity) {
 }
 
 bool vp_item_download_path(const VpItem *item, const char *directory,
-                           char *destination, size_t capacity) {
+                            char *destination, size_t capacity) {
     char safe[VP_TEXT];
+    char platform[VP_TEXT];
     char extension[VP_DOWNLOAD_EXTENSION];
     size_t directory_length;
     int written;
@@ -344,11 +345,12 @@ bool vp_item_download_path(const VpItem *item, const char *directory,
     if (item == NULL || item->id[0] == '\0' || directory == NULL || directory[0] == '\0' ||
         destination == NULL || capacity == 0) return false;
     vp_safe_component(item->id, safe, sizeof(safe));
+    vp_safe_component(item->platform, platform, sizeof(platform));
     if (!vp_item_extension(item, extension, sizeof(extension))) return false;
     directory_length = strlen(directory);
     while (directory_length > 0 && directory[directory_length - 1] == '/') directory_length--;
-    written = snprintf(destination, capacity, "%.*s/%s.%s", (int)directory_length, directory,
-                       safe, extension);
+    written = snprintf(destination, capacity, "%.*s/%s/%s.%s", (int)directory_length, directory,
+                       platform, safe, extension);
     return written > 0 && (size_t)written < capacity;
 }
 

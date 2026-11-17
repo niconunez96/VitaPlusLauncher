@@ -59,7 +59,7 @@ ux0:data/vitaplus/config.ini
 ux0:data/vitaplus/themes/<tema>/theme.ini
 ux0:data/vitaplus/cache/
 ux0:data/vitaplus/cache/covers/
-ux0:data/vitaplus/downloads/
+ux0:data/vitaplus/downloads/<plataforma>/
 ```
 
 Las carátulas se obtienen directamente desde Libretro Thumbnails y se activan automáticamente.
@@ -73,9 +73,9 @@ Usá la URL base de tu servidor (por ejemplo, `http://192.168.1.100:8080`) y cre
 
 ## Descargas y lanzamiento
 
-Cada ROM de RomM muestra un ícono de descarga (flecha) o un check blanco cuando ya está en `ux0:data/vitaplus/downloads/`. Presioná `X` sobre una ROM sin descargar para bajarla; al terminar, `X` la abre con el emulador configurado.
+Cada ROM de RomM muestra un ícono de descarga (flecha) o un check blanco cuando ya está en `ux0:data/vitaplus/downloads/<plataforma>/`. Presioná `X` sobre una ROM sin descargar para bajarla en segundo plano; podés seguir navegando mientras termina y luego `X` la abre con el emulador configurado.
 
-El nombre del archivo conserva la extensión real que reporta RomM (`fs_name` o la URL de contenido): `sfc`, `nds`, `zip`, etc. La descarga usa `<archivo>.part` y renombra al final, así que un corte de red no deja una ROM marcada como lista. El estado se vuelve a comprobar al arrancar y después de sincronizar RomM.
+El nombre del archivo conserva la extensión real que reporta RomM (`fs_name` o la URL de contenido): `sfc`, `nds`, `zip`, etc. La descarga usa `<archivo>.part` y renombra al final, así que un corte de red no deja una ROM marcada como lista. Las sincronizaciones, descargas e instalaciones se ejecutan en segundo plano; el estado se vuelve a comprobar al arrancar y después de sincronizar RomM.
 
 Las ROMs que RomM marca con varios archivos (`has_multiple_files`, por ejemplo un disco PSX con `.cue` y `.bin`) no se descargan desde la UI: el endpoint devuelve un ZIP que el emulador no puede abrir directamente. Descargalas desde RomM, extraelas y agregá el `.cue`/`.m3u` como juego local.
 
