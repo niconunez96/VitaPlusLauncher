@@ -7,6 +7,7 @@
 #include <vita2d.h>
 
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +20,30 @@
 #define VP_CATALOG_CACHE_PATH "ux0:data/vitaplus/catalog.cache"
 #define VP_CATALOG_CACHE_PARTIAL "ux0:data/vitaplus/catalog.cache.part"
 #define VP_CATALOG_CACHE_VERSION 1U
+#define VP_UI_FONT_PATH "app0:assets/fonts/NotoSans-Regular.ttf"
+
+static float ui_font_size(float legacy_scale) {
+    float size = legacy_scale * 23.0f;
+    return size < 14.0f ? 14.0f : size;
+}
+
+static void ui_font_draw_text(vita2d_font *font, int x, int y, unsigned int color,
+                              float legacy_scale, const char *text) {
+    vita2d_font_draw_text(font, x, y, color, ui_font_size(legacy_scale), text);
+}
+
+static void ui_font_draw_textf(vita2d_font *font, int x, int y, unsigned int color,
+                               float legacy_scale, const char *format, ...) {
+    va_list args;
+    char text[VP_TEXT];
+    va_start(args, format);
+    (void)vsnprintf(text, sizeof(text), format, args);
+    va_end(args);
+    ui_font_draw_text(font, x, y, color, legacy_scale, text);
+}
+
+#define vita2d_pgf_draw_text ui_font_draw_text
+#define vita2d_pgf_draw_textf ui_font_draw_textf
 
 static VpRommConfig romm_config;
 static VpHomebrewConfig homebrew_config;
@@ -811,7 +836,7 @@ static size_t visible_position(const size_t *visible, size_t count, size_t item_
 
 static void draw_download_badge(int x, int y, bool installed, unsigned int accent);
 
-static void draw_platforms(vita2d_pgf *font, const VpApp *app, size_t count,
+static void draw_platforms(vita2d_font *font, const VpApp *app, size_t count,
                            unsigned int surface, unsigned int text, unsigned int accent,
                            unsigned int muted) {
     size_t start = (app->selected_platform / 8) * 8;
@@ -837,7 +862,7 @@ static void draw_platforms(vita2d_pgf *font, const VpApp *app, size_t count,
     }
 }
 
-static void draw_rom_grid(vita2d_pgf *font, const VpApp *app, const size_t *visible, size_t count,
+static void draw_rom_grid(vita2d_font *font, const VpApp *app, const size_t *visible, size_t count,
                           unsigned int surface, unsigned int text, unsigned int accent,
                           unsigned int muted) {
     size_t position = visible_position(visible, count, app->selected_item);
@@ -863,7 +888,7 @@ static void draw_rom_grid(vita2d_pgf *font, const VpApp *app, const size_t *visi
     }
 }
 
-static void draw_list(vita2d_pgf *font, const VpApp *app, const size_t *visible, size_t count,
+static void draw_list(vita2d_font *font, const VpApp *app, const size_t *visible, size_t count,
                       unsigned int text, unsigned int accent) {
     size_t position = visible_position(visible, count, app->selected_item);
     size_t start = (position / 6) * 6;
@@ -879,7 +904,7 @@ static void draw_list(vita2d_pgf *font, const VpApp *app, const size_t *visible,
     }
 }
 
-static void draw_carousel(vita2d_pgf *font, const VpApp *app, const size_t *visible, size_t count,
+static void draw_carousel(vita2d_font *font, const VpApp *app, const size_t *visible, size_t count,
                           unsigned int surface, unsigned int text, unsigned int accent) {
     size_t position = visible_position(visible, count, app->selected_item);
     size_t previous = (position + count - 1) % count;
@@ -1027,7 +1052,7 @@ static void refresh_download_queue_progress(void) {
     }
 }
 
-static void draw_shell(vita2d_pgf *font, VpApp *app) {
+static void draw_shell(vita2d_font *font, VpApp *app) {
     unsigned int background = theme_color(app->theme.background, RGBA(17, 20, 28, 255));
     unsigned int surface = theme_color(app->theme.surface, RGBA(32, 41, 56, 255));
     unsigned int accent = theme_color(app->theme.accent, RGBA(91, 192, 190, 255));
@@ -1220,7 +1245,7 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
 int main(void) {
     SceCtrlData pad;
     unsigned int previous = 0;
-    vita2d_pgf *font;
+    vita2d_font *font;
     vp_app_init(&app);
     vp_download_queue_init(&download_queue);
     vp_launch_config_init(&launch_config);
@@ -1235,7 +1260,8 @@ int main(void) {
         (void)snprintf(app.notice, sizeof(app.notice), "Biblioteca cargada desde cache");
     refresh_downloaded_items(&app);
     vita2d_init();
-    font = vita2d_load_default_pgf();
+    font = vita2d_load_font_file(VP_UI_FONT_PATH);
+    if (font == NULL) return 1;
     (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
     for (;;) {
@@ -1286,7 +1312,7 @@ int main(void) {
         vita2d_end_drawing();
         vita2d_swap_buffers();
     }
-    vita2d_free_pgf(font);
+    vita2d_free_font(font);
     vita2d_fini();
     sceKernelExitProcess(0);
     return 0;

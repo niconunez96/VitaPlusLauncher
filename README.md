@@ -21,6 +21,7 @@ include/                 API portable del núcleo
 src/core/                modelo, catálogo, temas, providers y transferencias
 src/vita/                frontend Vita2D inicial
 themes/default/          tema base editable
+assets/fonts/            tipografía incluida en el VPK
 tests/                   pruebas host con gcc
 docs/                    arquitectura y contrato de providers
 ```
@@ -51,6 +52,11 @@ cmake --build build/vita
 ```
 
 El VPK queda en `build/vita/vitaplus.vpk`.
+
+La interfaz incluye **Noto Sans Regular** y la usa para todos los textos. Esto evita
+depender de la fuente PGF predeterminada y mantiene el texto legible en la pantalla
+nativa de 960×544 de una PS Vita. La fuente se distribuye bajo SIL Open Font License
+1.1; la licencia incluida queda en `assets/licenses/NotoSans-OFL-1.1.txt`.
 
 ## Configuración en Vita
 
