@@ -62,6 +62,11 @@ ux0:data/vitaplus/cache/covers/
 ux0:data/vitaplus/downloads/
 ```
 
+Las carátulas se obtienen directamente desde Libretro Thumbnails y se activan automáticamente.
+Antes de decodificarlas, VitaPlus acepta sólo PNG RGB/RGBA de 8 bits, sin interlace, de hasta
+`512×512` píxeles y `512 KiB`; una imagen ausente o rechazada conserva la navegación sin artwork.
+Si una instalación anterior tiene artwork problemático, borrá `ux0:data/vitaplus/cache/covers/`.
+
 En **Ajustes**, configurá la `URL` y presioná `X` en `Pair code` para introducir el código corto que genera **Pair Device** en RomM. `Triángulo` canjea el código una sola vez, guarda internamente el token recibido y sincroniza el catálogo. El código no se persiste ni se vuelve a mostrar; el token nunca se muestra en pantalla.
 
 Usá la URL base de tu servidor (por ejemplo, `http://192.168.1.100:8080`) y creá en RomM un Client API Token de permisos mínimos de lectura/descarga antes de generar el pair code. Nunca compartas `config.ini`: contiene el token recibido.

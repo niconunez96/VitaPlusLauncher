@@ -268,7 +268,7 @@ static void safe_id(const char *id, char *destination, size_t capacity) {
 static void cover_path_for(const char *id, char *path, size_t capacity) {
     char safe[VP_TEXT];
     safe_id(id, safe, sizeof(safe));
-    (void)snprintf(path, capacity, "ux0:data/vitaplus/cache/covers/%s.png", safe);
+    (void)snprintf(path, capacity, "ux0:data/vitaplus/cache/covers/libretro-%s.png", safe);
 }
 
 static VpCoverSlot *find_cover_slot(const char *id) {
@@ -321,18 +321,20 @@ static VpCoverSlot *acquire_slot(const char *id, const size_t *indexes, size_t c
 
 static vita2d_texture *load_texture_file(const char *path) {
     FILE *file;
-    unsigned char magic[8];
+    unsigned char header[29];
     size_t read_count;
+    long file_size;
     file = fopen(path, "rb");
     if (file == NULL) return NULL;
-    read_count = fread(magic, 1, sizeof(magic), file);
+    if (fseek(file, 0, SEEK_END) != 0 || (file_size = ftell(file)) < 0 || file_size > 512 * 1024 ||
+        fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return NULL;
+    }
+    read_count = fread(header, 1, sizeof(header), file);
     fclose(file);
-    if (read_count >= 8 && magic[0] == 0x89 && magic[1] == 'P' && magic[2] == 'N' && magic[3] == 'G')
+    if (vp_safe_cover_png(header, read_count))
         return vita2d_load_PNG_file(path);
-    if (read_count >= 2 && magic[0] == 0xFF && magic[1] == 0xD8)
-        return vita2d_load_JPEG_file(path);
-    if (read_count >= 2 && magic[0] == 'B' && magic[1] == 'M')
-        return vita2d_load_BMP_file(path);
     return NULL;
 }
 
@@ -343,21 +345,26 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
     for (index = 0; index < count; index++) {
         const VpItem *item = &app->catalog.items[indexes[index]];
         VpCoverSlot *slot;
+        VpItem thumbnail_item;
         char path[VP_PATH];
+        char thumbnail_url[VP_URL];
         FILE *file;
-        if (item->cover_url[0] == '\0') continue;
+        if (!vp_libretro_thumbnail_url(item, thumbnail_url, sizeof(thumbnail_url))) continue;
         if (find_cover_slot(item->id) != NULL) continue;
         slot = acquire_slot(item->id, indexes, count);
         if (slot == NULL) return;
+        thumbnail_item = *item;
+        (void)snprintf(thumbnail_item.cover_url, sizeof(thumbnail_item.cover_url), "%s", thumbnail_url);
         cover_path_for(item->id, path, sizeof(path));
         file = fopen(path, "rb");
         if (file != NULL) {
             fclose(file);
-        } else if (!vp_cache_cover(item, &romm_config, path, transfer_backend)) {
+        } else if (!vp_cache_cover(&thumbnail_item, &romm_config, path, transfer_backend)) {
             slot->attempted = true;
             continue;
         }
         slot->texture = load_texture_file(path);
+        if (slot->texture == NULL) (void)sceIoRemove(path);
         slot->attempted = true;
         return;
     }
@@ -626,10 +633,19 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
 
     if (app->active_screen == VP_SCREEN_LIBRARY) {
         if (app->library_level == VP_LEVEL_PLATFORMS) {
-            size_t start;
             group_count = vp_catalog_platforms(&app->catalog, platform_groups, VP_MAX_PLATFORMS);
             if (group_count > 0 && app->selected_platform >= group_count)
                 app->selected_platform = group_count - 1;
+            if (group_count > 0) selected_group = &platform_groups[app->selected_platform];
+        } else {
+            visible_count = vp_app_visible(app, visible_indexes, VP_MAX_ITEMS);
+            if (visible_count > 0) selected = &app->catalog.items[app->selected_item];
+        }
+    }
+
+    if (app->active_screen == VP_SCREEN_LIBRARY) {
+        if (app->library_level == VP_LEVEL_PLATFORMS) {
+            size_t start;
             start = (app->selected_platform / 8) * 8;
             for (index = start; index < group_count && index < start + 8; index++) {
                 size_t item_index = platform_first_item(&app->catalog, platform_groups[index].platform);
@@ -638,8 +654,7 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
             }
             if (group_count > 0) {
                 size_t item_index = platform_first_item(&app->catalog,
-                                                        platform_groups[app->selected_platform].platform);
-                selected_group = &platform_groups[app->selected_platform];
+                                                         platform_groups[app->selected_platform].platform);
                 if (item_index < app->catalog.count)
                     background_texture = cover_texture_for(app->catalog.items[item_index].id);
             }
@@ -647,15 +662,12 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
             size_t page_size = app->active_view == VP_VIEW_GRID ? 8 : (app->active_view == VP_VIEW_LIST ? 6 : 3);
             size_t position;
             size_t start;
-            visible_count = vp_app_visible(app, visible_indexes, VP_MAX_ITEMS);
             position = visible_position(visible_indexes, visible_count, app->selected_item);
             start = (position / page_size) * page_size;
             for (index = start; index < visible_count && index < start + page_size; index++)
                 cover_indexes[cover_count++] = visible_indexes[index];
-            if (visible_count > 0) {
-                selected = &app->catalog.items[app->selected_item];
+            if (selected != NULL)
                 background_texture = cover_texture_for(selected->id);
-            }
         }
         covers_step(app, cover_indexes, cover_count);
         if (background_texture == NULL && selected != NULL)

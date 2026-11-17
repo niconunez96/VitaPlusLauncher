@@ -194,6 +194,8 @@ bool vp_build_launch_uri(const VpLaunchProfile *profile, const char *rom_path,
  * non-ASCII). Existing %XX sequences are preserved so URLs are never double encoded.
  * Returns false when the escaped result does not fit in destination. */
 bool vp_url_escape(const char *url, char *destination, size_t capacity);
+bool vp_libretro_thumbnail_url(const VpItem *item, char *destination, size_t capacity);
+bool vp_safe_cover_png(const unsigned char *data, size_t size);
 
 bool vp_local_import_manifest(VpCatalog *catalog, const char *manifest);
 bool vp_romm_import(VpCatalog *catalog, const char *json);

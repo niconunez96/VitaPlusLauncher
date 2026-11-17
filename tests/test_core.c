@@ -491,6 +491,31 @@ static void test_romm_sync(void) {
     assert(strcmp(transfer_log.bearer, "") == 0);
 }
 
+static void test_libretro_thumbnail_safety(void) {
+    VpItem item = make_item("romm:99", "F-Zero");
+    char url[VP_URL];
+    const unsigned char valid_png[] = {
+        0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x0d, 'I', 'H', 'D', 'R',
+        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x80,
+        0x08, 0x06, 0x00, 0x00, 0x00
+    };
+    unsigned char unsafe_png[sizeof(valid_png)];
+
+    (void)snprintf(item.platform, sizeof(item.platform), "snes");
+    assert(vp_libretro_thumbnail_url(&item, url, sizeof(url)));
+    assert(strcmp(url, "https://thumbnails.libretro.com/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System/Named_Boxarts/F-Zero.png") == 0);
+    (void)snprintf(item.fs_name, sizeof(item.fs_name), "F-Zero (USA).sfc");
+    assert(vp_libretro_thumbnail_url(&item, url, sizeof(url)));
+    assert(strcmp(url, "https://thumbnails.libretro.com/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System/Named_Boxarts/F-Zero%20(USA).png") == 0);
+    assert(vp_safe_cover_png(valid_png, sizeof(valid_png)));
+    memcpy(unsafe_png, valid_png, sizeof(unsafe_png));
+    unsafe_png[16] = 0x03;
+    assert(!vp_safe_cover_png(unsafe_png, sizeof(unsafe_png)));
+    (void)snprintf(item.platform, sizeof(item.platform), "unknown");
+    assert(!vp_libretro_thumbnail_url(&item, url, sizeof(url)));
+}
+
 static void test_romm_pagination(void) {
     VpCatalog catalog;
     FetchLog fetch_log;
@@ -611,6 +636,7 @@ int main(void) {
     test_local_library();
     test_romm_pair_code_exchange();
     test_romm_sync();
+    test_libretro_thumbnail_safety();
     test_romm_pagination();
     test_romm_sync_fails_after_partial_page();
     test_homebrew_store_sync();

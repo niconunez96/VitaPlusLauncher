@@ -878,6 +878,79 @@ bool vp_url_escape(const char *url, char *destination, size_t capacity) {
     return true;
 }
 
+static const char *vp_libretro_system(const char *platform) {
+    static const struct {
+        const char *platform;
+        const char *system;
+    } systems[] = {
+        {"nes", "Nintendo - Nintendo Entertainment System"},
+        {"snes", "Nintendo - Super Nintendo Entertainment System"},
+        {"gb", "Nintendo - Game Boy"},
+        {"gbc", "Nintendo - Game Boy Color"},
+        {"gba", "Nintendo - Game Boy Advance"},
+        {"nds", "Nintendo - Nintendo DS"},
+        {"genesis", "Sega - Mega Drive - Genesis"},
+        {"mega-drive", "Sega - Mega Drive - Genesis"},
+        {"megadrive", "Sega - Mega Drive - Genesis"},
+        {"mastersystem", "Sega - Master System - Mark III"},
+        {"sms", "Sega - Master System - Mark III"},
+        {"gamegear", "Sega - Game Gear"},
+        {"psx", "Sony - PlayStation"},
+        {"playstation", "Sony - PlayStation"},
+        {"psp", "Sony - PlayStation Portable"},
+        {"pce", "NEC - PC Engine - TurboGrafx 16"},
+        {"pc-engine", "NEC - PC Engine - TurboGrafx 16"},
+        {"turbografx-16", "NEC - PC Engine - TurboGrafx 16"}
+    };
+    size_t index;
+    if (platform == NULL) return NULL;
+    for (index = 0; index < sizeof(systems) / sizeof(systems[0]); index++) {
+        if (vp_compare_ci(platform, systems[index].platform) == 0) return systems[index].system;
+    }
+    return NULL;
+}
+
+bool vp_libretro_thumbnail_url(const VpItem *item, char *destination, size_t capacity) {
+    char unescaped[VP_URL];
+    char title[VP_TEXT];
+    char *extension;
+    const char *source_title;
+    const char *system;
+    size_t index;
+    if (item == NULL || destination == NULL || capacity == 0 || item->title[0] == '\0') return false;
+    system = vp_libretro_system(item->platform);
+    if (system == NULL) return false;
+    source_title = item->fs_name[0] != '\0' ? item->fs_name : item->title;
+    vp_copy(title, sizeof(title), source_title);
+    if (item->fs_name[0] != '\0') {
+        extension = strrchr(title, '.');
+        if (extension != NULL) *extension = '\0';
+    }
+    for (index = 0; title[index] != '\0'; index++) {
+        if (title[index] == '/' || title[index] == '\\') title[index] = '_';
+    }
+    if (snprintf(unescaped, sizeof(unescaped),
+                 "https://thumbnails.libretro.com/%s/Named_Boxarts/%s.png", system, title) >=
+        (int)sizeof(unescaped)) return false;
+    return vp_url_escape(unescaped, destination, capacity);
+}
+
+bool vp_safe_cover_png(const unsigned char *data, size_t size) {
+    unsigned int width;
+    unsigned int height;
+    static const unsigned char signature[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    if (data == NULL || size < 29 || memcmp(data, signature, sizeof(signature)) != 0 ||
+        data[8] != 0 || data[9] != 0 || data[10] != 0 || data[11] != 13 ||
+        memcmp(data + 12, "IHDR", 4) != 0) return false;
+    width = ((unsigned int)data[16] << 24) | ((unsigned int)data[17] << 16) |
+            ((unsigned int)data[18] << 8) | data[19];
+    height = ((unsigned int)data[20] << 24) | ((unsigned int)data[21] << 16) |
+             ((unsigned int)data[22] << 8) | data[23];
+    return width > 0 && height > 0 && width <= 512 && height <= 512 &&
+           data[24] == 8 && (data[25] == 2 || data[25] == 6) &&
+           data[26] == 0 && data[27] == 0 && data[28] == 0;
+}
+
 static const char *vp_array_end(const char *begin) {
     int depth = 0;
     bool quoted = false;
