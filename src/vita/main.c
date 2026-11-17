@@ -1,5 +1,6 @@
 #include <psp2/ctrl.h>
 #include <psp2/ime_dialog.h>
+#include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/sysmodule.h>
@@ -17,6 +18,7 @@
 
 static VpRommConfig romm_config;
 static VpHomebrewConfig homebrew_config;
+static VpLaunchConfig launch_config;
 static VpApp app;
 static VpCatalog romm_catalog;
 static char active_theme[VP_TEXT] = "default";
@@ -73,6 +75,8 @@ static void load_providers(VpApp *app) {
             (void)snprintf(homebrew_config.catalog_url, sizeof(homebrew_config.catalog_url), "%s", equals);
         else if (strcmp(line, "active_theme") == 0)
             (void)snprintf(active_theme, sizeof(active_theme), "%s", equals);
+        else if (strncmp(line, "launch_", 7) == 0)
+            (void)vp_launch_config_set(&launch_config, line + 7, equals);
     }
     fclose(file);
     if (strcmp(active_theme, "default") != 0) {
@@ -88,13 +92,45 @@ static void load_providers(VpApp *app) {
 
 static bool save_romm_config(void) {
     FILE *file;
+    size_t index;
     (void)sceIoMkdir("ux0:data", 0777);
     (void)sceIoMkdir("ux0:data/vitaplus", 0777);
     file = fopen(VP_CONFIG_PATH, "w");
     if (file == NULL) return false;
     (void)fprintf(file, "romm_url=%s\nromm_token=%s\nhomebrew_catalog=%s\nactive_theme=%s\n",
                   romm_config.base_url, romm_config.token, homebrew_config.catalog_url, active_theme);
+    for (index = 0; index < launch_config.count; index++) {
+        const VpLaunchProfile *profile = &launch_config.profiles[index];
+        (void)fprintf(file, "launch_%s=%s:%s\n", profile->platform, profile->titleid,
+                      profile->core);
+    }
     return fclose(file) == 0;
+}
+
+static bool file_exists(const char *path) {
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) return false;
+    fclose(file);
+    return true;
+}
+
+static void refresh_downloaded_items(VpApp *app) {
+    size_t index;
+    if (app == NULL) return;
+    for (index = 0; index < app->catalog.count; index++) {
+        VpItem *item = &app->catalog.items[index];
+        char path[VP_PATH];
+        if (item->source != VP_SOURCE_ROMM) continue;
+        if (item->multi_file ||
+            !vp_item_download_path(item, "ux0:data/vitaplus/downloads", path, sizeof(path)) ||
+            !file_exists(path)) {
+            item->installed = false;
+            item->launch_target[0] = '\0';
+            continue;
+        }
+        item->installed = true;
+        (void)snprintf(item->launch_target, sizeof(item->launch_target), "%s", path);
+    }
 }
 
 static bool sync_romm_catalog(VpApp *app) {
@@ -118,6 +154,7 @@ static bool sync_romm_catalog(VpApp *app) {
     app->active_platform[0] = '\0';
     app->selected_platform = 0;
     app->selected_item = 0;
+    refresh_downloaded_items(app);
     return true;
 }
 
@@ -375,6 +412,8 @@ static size_t visible_position(const size_t *visible, size_t count, size_t item_
     return 0;
 }
 
+static void draw_download_badge(int x, int y, bool installed, unsigned int accent);
+
 static void draw_platforms(vita2d_pgf *font, const VpApp *app, size_t count,
                            unsigned int surface, unsigned int text, unsigned int accent,
                            unsigned int muted) {
@@ -420,6 +459,7 @@ static void draw_rom_grid(vita2d_pgf *font, const VpApp *app, const size_t *visi
         vita2d_draw_rectangle(x + 3, y + 3, 210, 114, surface);
         if (texture != NULL) draw_cover_fit(texture, x + 8, y + 12, 72, 96);
         else vita2d_draw_rectangle(x + 8, y + 12, 72, 96, muted);
+        draw_download_badge(x + 54, y + 10, item->installed, accent);
         vita2d_pgf_draw_textf(font, x + 90, y + 38, text, 0.58f, "%.14s%s",
                               item->favorite ? "* " : "", item->title);
         vita2d_pgf_draw_textf(font, x + 90, y + 66, muted, 0.54f, "%.16s", item->platform_display);
@@ -435,7 +475,8 @@ static void draw_list(vita2d_pgf *font, const VpApp *app, const size_t *visible,
         const VpItem *item = &app->catalog.items[visible[index]];
         int y = 150 + (int)(index - start) * 38;
         unsigned int color = visible[index] == app->selected_item ? accent : text;
-        vita2d_pgf_draw_textf(font, 42, y, color, 0.76f, "%c %s%s [%s]",
+        draw_download_badge(36, y - 16, item->installed, accent);
+        vita2d_pgf_draw_textf(font, 72, y, color, 0.76f, "%c %s%s [%s]",
                               visible[index] == app->selected_item ? '>' : ' ',
                               item->favorite ? "* " : "", item->title, item->platform_display);
     }
@@ -456,40 +497,117 @@ static void draw_carousel(vita2d_pgf *font, const VpApp *app, const size_t *visi
     if (left != NULL) draw_cover_fit(left, 55, 190, 180, 160);
     if (middle != NULL) draw_cover_fit(middle, 370, 145, 220, 250);
     if (right != NULL) draw_cover_fit(right, 725, 190, 180, 160);
+    draw_download_badge(562, 149, center->installed, accent);
     vita2d_pgf_draw_textf(font, 62, 280, text, 0.62f, "%.12s", app->catalog.items[visible[previous]].title);
     vita2d_pgf_draw_textf(font, 382, 420, text, 0.72f, "%.18s", center->title);
     vita2d_pgf_draw_textf(font, 382, 445, surface, 0.58f, "%.18s", center->platform_display);
     vita2d_pgf_draw_textf(font, 732, 280, text, 0.62f, "%.12s", app->catalog.items[visible[next]].title);
 }
 
-static void download_selected(VpApp *app) {
+static void draw_download_badge(int x, int y, bool installed, unsigned int accent) {
+    unsigned int white = RGBA(255, 255, 255, 255);
+    vita2d_draw_rectangle(x, y, 26, 26, RGBA(12, 15, 22, 220));
+    if (installed) {
+        vita2d_draw_line(x + 6, y + 13, x + 11, y + 18, white);
+        vita2d_draw_line(x + 11, y + 18, x + 19, y + 6, white);
+        vita2d_draw_line(x + 6, y + 14, x + 11, y + 19, white);
+        vita2d_draw_line(x + 11, y + 19, x + 19, y + 7, white);
+    } else {
+        vita2d_draw_rectangle(x + 12, y + 5, 2, 12, accent);
+        vita2d_draw_line(x + 13, y + 16, x + 6, y + 10, accent);
+        vita2d_draw_line(x + 13, y + 17, x + 6, y + 11, accent);
+        vita2d_draw_line(x + 13, y + 16, x + 20, y + 10, accent);
+        vita2d_draw_line(x + 13, y + 17, x + 20, y + 11, accent);
+    }
+}
+
+static void activate_selected(VpApp *app) {
     VpItem *item;
     VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
-    char destination[VP_TEXT];
     if (app->catalog.count == 0 || app->selected_item >= app->catalog.count) return;
     item = &app->catalog.items[app->selected_item];
-    safe_id(item->id, destination, sizeof(destination));
     if (item->source == VP_SOURCE_HOMEBREW) {
+        char destination[VP_TEXT];
         char path[VP_PATH];
+        safe_id(item->id, destination, sizeof(destination));
         if (!app->installation_armed) {
             app->installation_armed = true;
             (void)snprintf(app->notice, sizeof(app->notice), "Presiona X otra vez para instalar %.150s", item->title);
             return;
         }
         (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/downloads/%s.vpk", destination);
-        if (vp_install_homebrew(item, path, transfer_backend))
+        if (vp_install_homebrew(item, path, transfer_backend)) {
+            item->installed = true;
             (void)snprintf(app->notice, sizeof(app->notice), "Instalacion finalizada; revisa LiveArea");
-        else
+        } else {
             (void)snprintf(app->notice, sizeof(app->notice), "Fallo la instalacion; revisa la red y el archivo");
+        }
         app->installation_armed = false;
-    } else if (item->source == VP_SOURCE_ROMM) {
-        char path[VP_PATH];
-        (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/downloads/%s.rom", destination);
-        if (vp_queue_download(item, &romm_config, path, transfer_backend))
-            (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada en %.160s", path);
-        else
-            (void)snprintf(app->notice, sizeof(app->notice), "Fallo la descarga; revisa la red y el archivo");
+        return;
     }
+    if (item->installed && item->launch_target[0] != '\0') {
+        const VpLaunchProfile *profile = vp_launch_config_find(&launch_config, item->platform);
+        char uri[VP_LAUNCH_URI];
+        if (profile == NULL) {
+            (void)snprintf(app->notice, sizeof(app->notice),
+                           "Sin emulador para %.40s; agrega launch_%.40s=<titleid>[:<core>] en config.ini",
+                           item->platform, item->platform);
+            return;
+        }
+        if (!vp_build_launch_uri(profile, item->launch_target, uri, sizeof(uri))) {
+            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo preparar el lanzamiento");
+            return;
+        }
+        if (!vp_vita_launch_uri(uri)) {
+            (void)snprintf(app->notice, sizeof(app->notice),
+                           "No se pudo abrir %.32s; verifica que el emulador este instalado",
+                           profile->titleid);
+            return;
+        }
+        sceKernelExitProcess(0);
+        return;
+    }
+    if (item->source == VP_SOURCE_ROMM) {
+        char path[VP_PATH];
+        char partial[VP_PATH + 8];
+        if (item->multi_file) {
+            (void)snprintf(app->notice, sizeof(app->notice),
+                           "Esta ROM tiene varios archivos; descargala desde RomM y extraela en el emulador");
+            return;
+        }
+        if (item->download_url[0] == '\0') {
+            (void)snprintf(app->notice, sizeof(app->notice),
+                           "RomM no expuso un archivo descargable para esta ROM");
+            return;
+        }
+        if (!vp_item_download_path(item, "ux0:data/vitaplus/downloads", path, sizeof(path))) {
+            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo preparar el nombre de descarga");
+            return;
+        }
+        (void)snprintf(partial, sizeof(partial), "%s.part", path);
+        if (!vp_queue_download(item, &romm_config, partial, transfer_backend)) {
+            (void)snprintf(app->notice, sizeof(app->notice), "Fallo la descarga: %.110s", vp_vita_last_error());
+            return;
+        }
+        if (sceIoRename(partial, path) < 0) {
+            (void)sceIoRemove(partial);
+            (void)snprintf(app->notice, sizeof(app->notice), "Descarga completa pero no se pudo guardar el archivo");
+            return;
+        }
+        item->installed = true;
+        (void)snprintf(item->launch_target, sizeof(item->launch_target), "%s", path);
+        (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada; presiona X para jugar");
+        return;
+    }
+    (void)snprintf(app->notice, sizeof(app->notice), "Este elemento no tiene un archivo ejecutable");
+}
+
+static const char *item_state_label(const VpItem *item) {
+    if (item->source == VP_SOURCE_ROMM) {
+        if (item->multi_file) return "Varios archivos";
+        return item->installed ? "Descargado" : "Sin descargar";
+    }
+    return item->installed ? "Instalado" : "Remoto";
 }
 
 static void draw_shell(vita2d_pgf *font, VpApp *app) {
@@ -553,7 +671,7 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
     draw_background(background_texture, background);
     vita2d_pgf_draw_text(font, 28, 42, text, 1.0f, "VitaPlus");
     vita2d_pgf_draw_text(font, 28, 70, muted, 0.58f,
-                         "Flechas navega | X abre/descarga | Circulo vuelve | L/R secciones | Triangulo vista | Cuadrado favorito | Start salir");
+                         "Flechas navega | X abre/descarga/juega | Circulo vuelve | L/R secciones | Triangulo vista | Cuadrado favorito | Start salir");
     vita2d_pgf_draw_text(font, 28, 112, accent, 1.0f, vp_screen_name(app->active_screen));
     vita2d_pgf_draw_text(font, 734, 112, muted, 0.8f, vp_view_name(app->active_view));
 
@@ -628,7 +746,7 @@ static void draw_shell(vita2d_pgf *font, VpApp *app) {
     vita2d_draw_rectangle(28, 425, 904, 105, surface);
     vita2d_pgf_draw_textf(font, 48, 455, text, 0.82f, "%.70s", selected->title);
     vita2d_pgf_draw_textf(font, 48, 482, muted, 0.62f, "%s | %s | %s", selected->platform_display,
-                          vp_source_name(selected->source), selected->installed ? "Instalado" : "Remoto");
+                          vp_source_name(selected->source), item_state_label(selected));
     if (app->notice[0] != '\0')
         vita2d_pgf_draw_text(font, 48, 510, RGBA(245, 174, 79, 255), 0.58f, app->notice);
     else if (selected->description[0] != '\0')
@@ -642,15 +760,18 @@ int main(void) {
     unsigned int previous = 0;
     vita2d_pgf *font;
     vp_app_init(&app);
+    vp_launch_config_init(&launch_config);
     if (setenv("OPENSSL_CONF", "app0:openssl.cnf", 1) != 0) return 1;
-    load_providers(&app);
-    vita2d_init();
-    font = vita2d_load_default_pgf();
-    (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     (void)sceIoMkdir("ux0:data", 0777);
     (void)sceIoMkdir("ux0:data/vitaplus", 0777);
     (void)sceIoMkdir("ux0:data/vitaplus/cache", 0777);
     (void)sceIoMkdir("ux0:data/vitaplus/cache/covers", 0777);
+    (void)sceIoMkdir("ux0:data/vitaplus/downloads", 0777);
+    load_providers(&app);
+    refresh_downloaded_items(&app);
+    vita2d_init();
+    font = vita2d_load_default_pgf();
+    (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
     for (;;) {
         unsigned int pressed;
@@ -690,7 +811,7 @@ int main(void) {
                 if (pressed & SCE_CTRL_CIRCLE) vp_app_back(&app);
                 if (pressed & SCE_CTRL_CROSS) {
                     if (app.library_level == VP_LEVEL_PLATFORMS) vp_app_open(&app);
-                    else download_selected(&app);
+                    else activate_selected(&app);
                 }
             }
         }

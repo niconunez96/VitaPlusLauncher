@@ -1,6 +1,7 @@
 #include "vita_backend.h"
 
 #include <curl/curl.h>
+#include <psp2/appmgr.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
@@ -345,10 +346,16 @@ bool vp_vita_transfer(const char *url, const char *bearer_token, const char *des
     sceIoClose(file.fd);
     downloaded = result == CURLE_OK && status >= 200 && status < 300;
     if (!downloaded) {
+        set_last_error(result, status, NULL, false);
         record_http_failure(transfer_url, result, status, NULL, false);
         (void)sceIoRemove(destination);
         return false;
     }
     if (action == VP_TRANSFER_INSTALL_VPK) installed = promote_vpk(destination);
     return installed;
+}
+
+bool vp_vita_launch_uri(const char *uri) {
+    if (uri == NULL || uri[0] == '\0') return false;
+    return sceAppMgrLaunchAppByUri(0x20000, uri) >= 0;
 }

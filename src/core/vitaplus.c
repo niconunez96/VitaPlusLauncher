@@ -88,6 +88,12 @@ static bool vp_json_value(const char *object, const char *object_end,
     return used > 0;
 }
 
+static bool vp_json_flag(const char *object, const char *object_end, const char *key) {
+    char value[8];
+    if (!vp_json_value(object, object_end, key, value, sizeof(value))) return false;
+    return strcmp(value, "true") == 0;
+}
+
 static const char *vp_object_end(const char *begin) {
     int depth = 0;
     bool quoted = false;
@@ -267,6 +273,200 @@ void vp_item_toggle_favorite(VpItem *item) {
 
 void vp_item_mark_played(VpItem *item, unsigned long timestamp) {
     if (item != NULL) item->last_played = timestamp;
+}
+
+static void vp_safe_component(const char *source, char *destination, size_t capacity) {
+    size_t used = 0;
+    size_t index;
+    if (destination == NULL || capacity == 0) return;
+    if (source != NULL) {
+        for (index = 0; source[index] != '\0' && used + 1 < capacity; index++) {
+            unsigned char value = (unsigned char)source[index];
+            destination[used++] = (isalnum(value) || value == '-' || value == '_')
+                                      ? (char)value
+                                      : '_';
+        }
+    }
+    destination[used] = '\0';
+    if (destination[0] == '\0') vp_copy(destination, capacity, "item");
+}
+
+static void vp_extension_from(const char *source, char *destination, size_t capacity) {
+    const char *end;
+    const char *cursor;
+    const char *name;
+    const char *dot = NULL;
+    size_t length;
+    size_t index;
+
+    if (source == NULL || destination == NULL || capacity == 0) return;
+    end = source;
+    while (*end != '\0' && *end != '?' && *end != '#') end++;
+    name = source;
+    for (cursor = source; cursor < end; cursor++) {
+        if (*cursor == '/' || *cursor == '\\') name = cursor + 1;
+    }
+    for (cursor = name; cursor < end; cursor++) {
+        if (*cursor == '.') dot = cursor;
+    }
+    if (dot == NULL || dot + 1 >= end) return;
+    length = (size_t)(end - (dot + 1));
+    if (length + 1 > capacity) return;
+    for (index = 0; index < length; index++) {
+        if (!isalnum((unsigned char)dot[1 + index])) return;
+    }
+    for (index = 0; index < length; index++) {
+        destination[index] = (char)tolower((unsigned char)dot[1 + index]);
+    }
+    destination[length] = '\0';
+}
+
+bool vp_item_extension(const VpItem *item, char *destination, size_t capacity) {
+    if (item == NULL || destination == NULL || capacity == 0) return false;
+    destination[0] = '\0';
+    if (item->fs_name[0] != '\0') vp_extension_from(item->fs_name, destination, capacity);
+    if (destination[0] == '\0' && item->download_url[0] != '\0')
+        vp_extension_from(item->download_url, destination, capacity);
+    if (destination[0] == '\0') {
+        if (capacity < 4) return false;
+        vp_copy(destination, capacity, "rom");
+    }
+    return true;
+}
+
+bool vp_item_download_path(const VpItem *item, const char *directory,
+                           char *destination, size_t capacity) {
+    char safe[VP_TEXT];
+    char extension[VP_DOWNLOAD_EXTENSION];
+    size_t directory_length;
+    int written;
+
+    if (item == NULL || item->id[0] == '\0' || directory == NULL || directory[0] == '\0' ||
+        destination == NULL || capacity == 0) return false;
+    vp_safe_component(item->id, safe, sizeof(safe));
+    if (!vp_item_extension(item, extension, sizeof(extension))) return false;
+    directory_length = strlen(directory);
+    while (directory_length > 0 && directory[directory_length - 1] == '/') directory_length--;
+    written = snprintf(destination, capacity, "%.*s/%s.%s", (int)directory_length, directory,
+                       safe, extension);
+    return written > 0 && (size_t)written < capacity;
+}
+
+typedef struct {
+    const char *platform;
+    const char *core;
+} VpDefaultLaunchProfile;
+
+static const VpDefaultLaunchProfile vp_default_launch_profiles[] = {
+    {"snes", "app0:/snes9x2005_libretro.self"},
+    {"nes", "app0:/fceumm_libretro.self"},
+    {"famicom", "app0:/fceumm_libretro.self"},
+    {"gba", "app0:/gpsp_libretro.self"},
+    {"gb", "app0:/gambatte_libretro.self"},
+    {"gbc", "app0:/gambatte_libretro.self"},
+    {"genesis", "app0:/genesis_plus_gx_libretro.self"},
+    {"mega-drive", "app0:/genesis_plus_gx_libretro.self"},
+    {"megadrive", "app0:/genesis_plus_gx_libretro.self"},
+    {"mastersystem", "app0:/genesis_plus_gx_libretro.self"},
+    {"sms", "app0:/genesis_plus_gx_libretro.self"},
+    {"gamegear", "app0:/genesis_plus_gx_libretro.self"},
+    {"psx", "app0:/pcsx_rearmed_libretro.self"},
+    {"playstation", "app0:/pcsx_rearmed_libretro.self"},
+    {"arcade", "app0:/fbneo_libretro.self"},
+    {"neogeo", "app0:/fbneo_libretro.self"},
+    {"pce", "app0:/mednafen_pce_fast_libretro.self"},
+    {"pc-engine", "app0:/mednafen_pce_fast_libretro.self"},
+    {"turbografx-16", "app0:/mednafen_pce_fast_libretro.self"},
+    {"atari2600", "app0:/stella2014_libretro.self"},
+    {"wonderswan", "app0:/mednafen_wswan_libretro.self"}
+};
+
+static bool vp_valid_titleid(const char *titleid) {
+    const char *cursor;
+    if (titleid == NULL || titleid[0] == '\0') return false;
+    for (cursor = titleid; *cursor != '\0'; cursor++) {
+        if (!isalnum((unsigned char)*cursor) && *cursor != '-' && *cursor != '_') return false;
+    }
+    return true;
+}
+
+static bool vp_launch_profile_append(VpLaunchConfig *config, const char *platform,
+                                     const char *titleid, const char *core) {
+    VpLaunchProfile *profile;
+    if (config == NULL || platform == NULL || platform[0] == '\0' ||
+        config->count >= VP_MAX_LAUNCH_PROFILES) return false;
+    profile = &config->profiles[config->count];
+    memset(profile, 0, sizeof(*profile));
+    vp_copy(profile->platform, sizeof(profile->platform), platform);
+    vp_copy(profile->titleid, sizeof(profile->titleid), titleid);
+    vp_copy(profile->core, sizeof(profile->core), core);
+    config->count++;
+    return true;
+}
+
+void vp_launch_config_init(VpLaunchConfig *config) {
+    size_t index;
+    if (config == NULL) return;
+    memset(config, 0, sizeof(*config));
+    for (index = 0;
+         index < sizeof(vp_default_launch_profiles) / sizeof(vp_default_launch_profiles[0]);
+         index++) {
+        (void)vp_launch_profile_append(config, vp_default_launch_profiles[index].platform,
+                                       "RETROVITA", vp_default_launch_profiles[index].core);
+    }
+}
+
+const VpLaunchProfile *vp_launch_config_find(const VpLaunchConfig *config,
+                                             const char *platform) {
+    size_t index;
+    if (config == NULL || platform == NULL) return NULL;
+    for (index = 0; index < config->count; index++) {
+        if (vp_compare_ci(config->profiles[index].platform, platform) == 0)
+            return &config->profiles[index];
+    }
+    return NULL;
+}
+
+bool vp_launch_config_set(VpLaunchConfig *config, const char *platform, const char *value) {
+    const char *colon;
+    size_t titleid_length;
+    char titleid[32];
+    const char *core;
+    VpLaunchProfile *profile;
+    size_t index;
+
+    if (config == NULL || platform == NULL || platform[0] == '\0' || value == NULL) return false;
+    colon = strchr(value, ':');
+    titleid_length = colon != NULL ? (size_t)(colon - value) : strlen(value);
+    if (titleid_length == 0 || titleid_length >= sizeof(titleid)) return false;
+    memcpy(titleid, value, titleid_length);
+    titleid[titleid_length] = '\0';
+    if (!vp_valid_titleid(titleid)) return false;
+    core = colon != NULL ? colon + 1 : "";
+    for (index = 0; index < config->count; index++) {
+        profile = &config->profiles[index];
+        if (vp_compare_ci(profile->platform, platform) != 0) continue;
+        vp_copy(profile->titleid, sizeof(profile->titleid), titleid);
+        vp_copy(profile->core, sizeof(profile->core), core);
+        return true;
+    }
+    return vp_launch_profile_append(config, platform, titleid, core);
+}
+
+bool vp_build_launch_uri(const VpLaunchProfile *profile, const char *rom_path,
+                         char *destination, size_t capacity) {
+    int written;
+    if (profile == NULL || rom_path == NULL || rom_path[0] == '\0' ||
+        destination == NULL || capacity == 0 || !vp_valid_titleid(profile->titleid))
+        return false;
+    if (profile->core[0] != '\0') {
+        written = snprintf(destination, capacity, "psgm:play?titleid=%s&param=%s&param2=%s",
+                           profile->titleid, profile->core, rom_path);
+    } else {
+        written = snprintf(destination, capacity, "psgm:play?titleid=%s&param=%s",
+                           profile->titleid, rom_path);
+    }
+    return written > 0 && (size_t)written < capacity;
 }
 
 const char *vp_source_name(VpSource source) {
@@ -511,6 +711,18 @@ bool vp_theme_load(VpTheme *theme, const char *ini_text) {
            theme->card_width > 0 && theme->card_height > 0;
 }
 
+static void vp_resolve_romm_download(VpItem *item) {
+    int written;
+    if (item == NULL || item->source != VP_SOURCE_ROMM ||
+        item->fs_name[0] == '\0' || item->remote_id[0] == '\0') return;
+    /* RomM exposes no downloadable URL in its ROM schema: the supported endpoint is
+     * synthesized from the ROM id and file name. Overwrite any stray value because a
+     * recursive "url" match can otherwise point at cover metadata. */
+    written = snprintf(item->download_url, sizeof(item->download_url), "/api/roms/%s/content/%s",
+                       item->remote_id, item->fs_name);
+    if (written < 0 || (size_t)written >= sizeof(item->download_url)) item->download_url[0] = '\0';
+}
+
 static bool vp_import_items(VpCatalog *catalog, const char *json, VpSource source,
                             VpKind kind, const char *default_platform) {
     const char *cursor = json;
@@ -549,9 +761,13 @@ static bool vp_import_items(VpCatalog *catalog, const char *json, VpSource sourc
         if (!vp_json_value(cursor, end, "summary", item.description, sizeof(item.description))) {
             (void)vp_json_value(cursor, end, "description", item.description, sizeof(item.description));
         }
-        if (!vp_json_value(cursor, end, "download_url", item.download_url, sizeof(item.download_url))) {
+        if (!vp_json_value(cursor, end, "download_url", item.download_url, sizeof(item.download_url)) &&
+            source != VP_SOURCE_ROMM) {
             (void)vp_json_value(cursor, end, "url", item.download_url, sizeof(item.download_url));
         }
+        (void)vp_json_value(cursor, end, "fs_name", item.fs_name, sizeof(item.fs_name));
+        item.multi_file = vp_json_flag(cursor, end, "has_multiple_files");
+        vp_resolve_romm_download(&item);
         if (!vp_json_value(cursor, end, "path_cover_small", item.cover_url, sizeof(item.cover_url)) &&
             !vp_json_value(cursor, end, "path_cover_large", item.cover_url, sizeof(item.cover_url)) &&
             !vp_json_value(cursor, end, "cover_url", item.cover_url, sizeof(item.cover_url))) {
@@ -720,8 +936,11 @@ static bool vp_romm_import_page(VpCatalog *catalog, const char *json, size_t *it
             vp_copy(item.platform_display, sizeof(item.platform_display), item.platform);
         if (!vp_json_value(cursor, object_end, "summary", item.description, sizeof(item.description)))
             (void)vp_json_value(cursor, object_end, "description", item.description, sizeof(item.description));
-        if (!vp_json_value(cursor, object_end, "download_url", item.download_url, sizeof(item.download_url)))
-            (void)vp_json_value(cursor, object_end, "url", item.download_url, sizeof(item.download_url));
+        (void)vp_json_value(cursor, object_end, "download_url", item.download_url,
+                            sizeof(item.download_url));
+        (void)vp_json_value(cursor, object_end, "fs_name", item.fs_name, sizeof(item.fs_name));
+        item.multi_file = vp_json_flag(cursor, object_end, "has_multiple_files");
+        vp_resolve_romm_download(&item);
         if (!vp_json_value(cursor, object_end, "path_cover_small", item.cover_url, sizeof(item.cover_url)) &&
             !vp_json_value(cursor, object_end, "path_cover_large", item.cover_url, sizeof(item.cover_url)) &&
             !vp_json_value(cursor, object_end, "cover_url", item.cover_url, sizeof(item.cover_url)))

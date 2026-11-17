@@ -10,6 +10,9 @@
 #define VP_URL 384
 #define VP_PATH 256
 #define VP_MAX_QUERY 80
+#define VP_MAX_LAUNCH_PROFILES 32
+#define VP_LAUNCH_URI 768
+#define VP_DOWNLOAD_EXTENSION 16
 /* A single RomM ROM object already weighs 17-30 KiB with metadata; leave headroom so a
  * metadata-heavy entry does not overflow the fixed core response buffer. */
 #define VP_FETCH_RESPONSE_SIZE (256 * 1024)
@@ -53,12 +56,14 @@ typedef struct {
     char description[VP_TEXT];
     char launch_target[VP_PATH];
     char remote_id[32];
+    char fs_name[VP_TEXT];
     char download_url[VP_URL];
     char cover_url[VP_URL];
     VpSource source;
     VpKind kind;
     bool installed;
     bool favorite;
+    bool multi_file;
     unsigned long last_played;
 } VpItem;
 
@@ -125,6 +130,17 @@ typedef struct {
     char catalog_url[VP_URL];
 } VpHomebrewConfig;
 
+typedef struct {
+    char platform[VP_TEXT];
+    char titleid[32];
+    char core[VP_PATH];
+} VpLaunchProfile;
+
+typedef struct {
+    VpLaunchProfile profiles[VP_MAX_LAUNCH_PROFILES];
+    size_t count;
+} VpLaunchConfig;
+
 typedef enum {
     VP_TRANSFER_DOWNLOAD,
     VP_TRANSFER_INSTALL_VPK
@@ -163,6 +179,16 @@ void vp_item_mark_played(VpItem *item, unsigned long timestamp);
 bool vp_theme_load(VpTheme *theme, const char *ini_text);
 const char *vp_source_name(VpSource source);
 const char *vp_view_name(VpView view);
+
+void vp_launch_config_init(VpLaunchConfig *config);
+bool vp_launch_config_set(VpLaunchConfig *config, const char *platform, const char *value);
+const VpLaunchProfile *vp_launch_config_find(const VpLaunchConfig *config,
+                                             const char *platform);
+bool vp_item_extension(const VpItem *item, char *destination, size_t capacity);
+bool vp_item_download_path(const VpItem *item, const char *directory,
+                           char *destination, size_t capacity);
+bool vp_build_launch_uri(const VpLaunchProfile *profile, const char *rom_path,
+                         char *destination, size_t capacity);
 
 /* Percent-encodes bytes that RFC 3986 forbids in a URL (spaces, quotes, braces, controls,
  * non-ASCII). Existing %XX sequences are preserved so URLs are never double encoded.

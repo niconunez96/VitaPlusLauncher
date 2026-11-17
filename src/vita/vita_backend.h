@@ -10,5 +10,6 @@ bool vp_vita_exchange_pair_code(const char *url, const char *code,
                                 char *response, size_t response_capacity, void *context);
 bool vp_vita_transfer(const char *url, const char *bearer_token, const char *destination,
                       VpTransferAction action, void *context);
+bool vp_vita_launch_uri(const char *uri);
 
 #endif

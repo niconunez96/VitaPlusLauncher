@@ -248,6 +248,138 @@ static void test_romm_metadata(void) {
     assert(strcmp(item->cover_url, "/assets/romm/resources/roms/7/7/cover/small.png") == 0);
 }
 
+static void test_download_paths(void) {
+    VpItem item;
+    char extension[16];
+    char path[VP_PATH];
+
+    memset(&item, 0, sizeof(item));
+    item.source = VP_SOURCE_ROMM;
+    (void)snprintf(item.id, sizeof(item.id), "%s", "romm:42");
+    (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "Super Metroid (USA).sfc");
+
+    assert(vp_item_extension(&item, extension, sizeof(extension)));
+    assert(strcmp(extension, "sfc") == 0);
+    assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitaplus/downloads/romm_42.sfc") == 0);
+    assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads/", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitaplus/downloads/romm_42.sfc") == 0);
+
+    /* RomM does not always expose fs_name; the content URL still carries the extension. */
+    item.fs_name[0] = '\0';
+    (void)snprintf(item.download_url, sizeof(item.download_url), "%s",
+                   "https://romm.local/api/roms/42/content/game.zip?token=1");
+    assert(vp_item_extension(&item, extension, sizeof(extension)));
+    assert(strcmp(extension, "zip") == 0);
+    assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitaplus/downloads/romm_42.zip") == 0);
+
+    (void)snprintf(item.download_url, sizeof(item.download_url), "%s",
+                   "https://romm.local/api/roms/42/content/7");
+    assert(vp_item_extension(&item, extension, sizeof(extension)));
+    assert(strcmp(extension, "rom") == 0);
+
+    assert(!vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, 8));
+}
+
+static void test_launch_profiles(void) {
+    VpLaunchConfig config;
+    const VpLaunchProfile *profile;
+    char uri[VP_LAUNCH_URI];
+
+    vp_launch_config_init(&config);
+    profile = vp_launch_config_find(&config, "snes");
+    assert(profile != NULL);
+    assert(strcmp(profile->titleid, "RETROVITA") == 0);
+    assert(strcmp(profile->core, "app0:/snes9x2005_libretro.self") == 0);
+    assert(vp_build_launch_uri(profile, "ux0:data/vitaplus/downloads/romm_42.sfc",
+                               uri, sizeof(uri)));
+    assert(strcmp(uri, "psgm:play?titleid=RETROVITA&param=app0:/snes9x2005_libretro.self"
+                       "&param2=ux0:data/vitaplus/downloads/romm_42.sfc") == 0);
+
+    assert(vp_launch_config_set(&config, "nds", "DSVITA000:"));
+    profile = vp_launch_config_find(&config, "nds");
+    assert(profile != NULL);
+    assert(strcmp(profile->titleid, "DSVITA000") == 0);
+    assert(profile->core[0] == '\0');
+    assert(vp_build_launch_uri(profile, "ux0:data/vitaplus/downloads/romm_7.nds",
+                               uri, sizeof(uri)));
+    assert(strcmp(uri, "psgm:play?titleid=DSVITA000&param=ux0:data/vitaplus/downloads/romm_7.nds") == 0);
+
+    assert(vp_launch_config_set(&config, "PSP", "VSCU00001:"));
+    assert(vp_launch_config_find(&config, "psp") != NULL);
+    assert(vp_launch_config_find(&config, "unknown-platform") == NULL);
+    assert(!vp_launch_config_set(&config, "snes", ""));
+    assert(!vp_build_launch_uri(profile, "ux0:data/vitaplus/downloads/romm_7.nds", uri, 16));
+}
+
+static void test_romm_content_download(void) {
+    VpCatalog catalog;
+    FetchLog fetch_log;
+    TransferLog transfer_log;
+    VpFetchBackend fetch_backend;
+    VpTransferBackend transfer_backend;
+    VpRommConfig config;
+    VpItem *item;
+    char path[VP_PATH];
+
+    memset(&fetch_log, 0, sizeof(fetch_log));
+    memset(&transfer_log, 0, sizeof(transfer_log));
+    memset(&config, 0, sizeof(config));
+    fetch_log.payload = "{\"total\":1,\"items\":[{\"id\":42,\"name\":\"Super Metroid\","
+                        "\"platform_slug\":\"snes\",\"fs_name\":\"Super Metroid (USA).sfc\"}]}";
+    (void)snprintf(config.base_url, sizeof(config.base_url), "http://romm.local/");
+    (void)snprintf(config.token, sizeof(config.token), "rmm_test_token");
+    fetch_backend.execute = fake_fetch;
+    fetch_backend.context = &fetch_log;
+    transfer_backend.execute = fake_transfer;
+    transfer_backend.context = &transfer_log;
+    vp_catalog_init(&catalog);
+
+    assert(vp_romm_sync(&catalog, &config, fetch_backend));
+    item = vp_catalog_find(&catalog, "romm:42");
+    assert(item != NULL);
+    assert(strcmp(item->fs_name, "Super Metroid (USA).sfc") == 0);
+    assert(strcmp(item->download_url,
+                  "http://romm.local/api/roms/42/content/Super Metroid (USA).sfc") == 0);
+    assert(vp_item_download_path(item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
+    assert(vp_queue_download(item, &config, path, transfer_backend));
+    assert(strcmp(transfer_log.url,
+                  "http://romm.local/api/roms/42/content/Super Metroid (USA).sfc") == 0);
+    assert(strcmp(transfer_log.destination,
+                  "ux0:data/vitaplus/downloads/romm_42.sfc") == 0);
+    assert(strcmp(transfer_log.bearer, "rmm_test_token") == 0);
+    assert(!item->multi_file);
+
+    {
+        VpCatalog nested_url;
+        vp_catalog_init(&nested_url);
+        assert(vp_romm_import(&nested_url,
+                              "{\"id\":86,\"name\":\"Castlevania\","
+                              "\"platform_slug\":\"gba\","
+                              "\"fs_name\":\"Castlevania.zip\","
+                              "\"launchbox_metadata\":{\"images\":[{\"url\":\""
+                              "https://images.launchbox-app.com/cover.jpg\"}]}}"));
+        item = vp_catalog_find(&nested_url, "romm:86");
+        assert(item != NULL);
+        assert(strcmp(item->download_url, "/api/roms/86/content/Castlevania.zip") == 0);
+    }
+
+    {
+        VpCatalog multi;
+        vp_catalog_init(&multi);
+        assert(vp_romm_import(&multi,
+                              "{\"id\":7,\"name\":\"Final Fantasy VII\","
+                              "\"platform_slug\":\"psx\",\"fs_name\":\"Final Fantasy VII\","
+                              "\"has_multiple_files\":true}"));
+        item = vp_catalog_find(&multi, "romm:7");
+        assert(item != NULL);
+        assert(item->multi_file);
+        assert(strcmp(item->download_url,
+                      "/api/roms/7/content/Final Fantasy VII") == 0);
+    }
+}
+
 static void test_url_escape(void) {
     char escaped[VP_URL * 3];
 
@@ -471,6 +603,9 @@ int main(void) {
     test_platform_grouping();
     test_library_navigation();
     test_romm_metadata();
+    test_download_paths();
+    test_launch_profiles();
+    test_romm_content_download();
     test_url_escape();
     test_theme();
     test_local_library();

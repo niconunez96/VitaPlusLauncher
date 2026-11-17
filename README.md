@@ -65,3 +65,23 @@ ux0:data/vitaplus/downloads/
 En **Ajustes**, configurá la `URL` y presioná `X` en `Pair code` para introducir el código corto que genera **Pair Device** en RomM. `Triángulo` canjea el código una sola vez, guarda internamente el token recibido y sincroniza el catálogo. El código no se persiste ni se vuelve a mostrar; el token nunca se muestra en pantalla.
 
 Usá la URL base de tu servidor (por ejemplo, `http://192.168.1.100:8080`) y creá en RomM un Client API Token de permisos mínimos de lectura/descarga antes de generar el pair code. Nunca compartas `config.ini`: contiene el token recibido.
+
+## Descargas y lanzamiento
+
+Cada ROM de RomM muestra un ícono de descarga (flecha) o un check blanco cuando ya está en `ux0:data/vitaplus/downloads/`. Presioná `X` sobre una ROM sin descargar para bajarla; al terminar, `X` la abre con el emulador configurado.
+
+El nombre del archivo conserva la extensión real que reporta RomM (`fs_name` o la URL de contenido): `sfc`, `nds`, `zip`, etc. La descarga usa `<archivo>.part` y renombra al final, así que un corte de red no deja una ROM marcada como lista. El estado se vuelve a comprobar al arrancar y después de sincronizar RomM.
+
+Las ROMs que RomM marca con varios archivos (`has_multiple_files`, por ejemplo un disco PSX con `.cue` y `.bin`) no se descargan desde la UI: el endpoint devuelve un ZIP que el emulador no puede abrir directamente. Descargalas desde RomM, extraelas y agregá el `.cue`/`.m3u` como juego local.
+
+El lanzamiento se configura por plataforma en `ux0:data/vitaplus/config.ini`:
+
+```text
+launch_snes=RETROVITA:app0:/snes9x2005_libretro.self
+launch_nds=DSVITA000:
+launch_psp=VSCU00001:
+```
+
+El formato es `launch_<platform>=<titleid>[:<core>]`. El `titleid` es el de la aplicación (por ejemplo, `RETROVITA` para RetroArch); el `core` opcional es el archivo `.self` que RetroArch debe cargar. Si omitís el core, VitaPlus manda sólo la ROM, útil para emuladores como DSVita. Para RetroArch, instalá los cores que uses en `app0:`.
+
+Perfiles por defecto (todos con `titleid=RETROVITA`): `snes`→`snes9x2005`, `nes`/`famicom`→`fceumm`, `gba`→`gpsp`, `gb`/`gbc`→`gambatte`, `genesis`/`mega-drive`/`megadrive`/`mastersystem`/`sms`/`gamegear`→`genesis_plus_gx`, `psx`/`playstation`→`pcsx_rearmed`, `arcade`/`neogeo`→`fbneo`, `pce`/`pc-engine`/`turbografx-16`→`mednafen_pce_fast`, `atari2600`→`stella2014`, `wonderswan`→`mednafen_wswan`. `nds` y `psp` no tienen core de RetroArch en Vita: configurá su `titleid` (`DSVITA000`, `VSCU00001`, …) o la ROM mostrará un aviso.
