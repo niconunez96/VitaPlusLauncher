@@ -14,6 +14,14 @@ typedef struct {
 
 typedef struct {
     int calls;
+    char source_url[VP_URL];
+    char bearer[VP_TEXT];
+    char service_url[VP_URL];
+    char destination[VP_PATH];
+} CoverTransformLog;
+
+typedef struct {
+    int calls;
     char url[VP_URL];
     char urls[4][VP_URL];
     char bearer[VP_TEXT];
@@ -69,6 +77,17 @@ static bool fake_transfer(const char *url, const char *bearer_token, const char 
     log->last_action = action;
     (void)snprintf(log->url, sizeof(log->url), "%s", url);
     (void)snprintf(log->bearer, sizeof(log->bearer), "%s", bearer_token != NULL ? bearer_token : "");
+    (void)snprintf(log->destination, sizeof(log->destination), "%s", destination);
+    return true;
+}
+
+static bool fake_cover_transform(const char *source_url, const char *bearer_token,
+                                 const char *service_url, const char *destination, void *context) {
+    CoverTransformLog *log = context;
+    log->calls++;
+    (void)snprintf(log->source_url, sizeof(log->source_url), "%s", source_url);
+    (void)snprintf(log->bearer, sizeof(log->bearer), "%s", bearer_token != NULL ? bearer_token : "");
+    (void)snprintf(log->service_url, sizeof(log->service_url), "%s", service_url);
     (void)snprintf(log->destination, sizeof(log->destination), "%s", destination);
     return true;
 }
@@ -458,13 +477,16 @@ static void test_romm_sync(void) {
     VpCatalog catalog;
     FetchLog fetch_log;
     TransferLog transfer_log;
+    CoverTransformLog cover_transform_log;
     VpFetchBackend fetch_backend;
     VpTransferBackend transfer_backend;
+    VpCoverTransformBackend cover_transform_backend;
     VpRommConfig config;
     VpItem *item;
 
     memset(&fetch_log, 0, sizeof(fetch_log));
     memset(&transfer_log, 0, sizeof(transfer_log));
+    memset(&cover_transform_log, 0, sizeof(cover_transform_log));
     memset(&config, 0, sizeof(config));
     (void)snprintf(config.base_url, sizeof(config.base_url), "http://romm.local/");
     (void)snprintf(config.token, sizeof(config.token), "rmm_test_token");
@@ -472,6 +494,8 @@ static void test_romm_sync(void) {
     fetch_backend.context = &fetch_log;
     transfer_backend.execute = fake_transfer;
     transfer_backend.context = &transfer_log;
+    cover_transform_backend.execute = fake_cover_transform;
+    cover_transform_backend.context = &cover_transform_log;
     vp_catalog_init(&catalog);
     assert(vp_romm_sync(&catalog, &config, fetch_backend));
     assert(fetch_log.calls == 1);
@@ -480,17 +504,20 @@ static void test_romm_sync(void) {
     item = vp_catalog_find(&catalog, "romm:99");
     assert(item != NULL);
     assert(strcmp(item->cover_url, "http://romm.local/assets/fzero.png") == 0);
-    assert(vp_cache_cover(item, &config, "ux0:data/vitaplus/cache/fzero.png", transfer_backend));
-    assert(transfer_log.calls == 1);
-    assert(strcmp(transfer_log.url, "http://romm.local/assets/fzero.png") == 0);
-    assert(strcmp(transfer_log.bearer, "rmm_test_token") == 0);
+    assert(vp_cache_cover(item, &config, "ux0:data/vitaplus/cache/fzero.png", cover_transform_backend));
+    assert(cover_transform_log.calls == 1);
+    assert(strcmp(cover_transform_log.source_url, "http://romm.local/assets/fzero.png") == 0);
+    assert(strcmp(cover_transform_log.bearer, "rmm_test_token") == 0);
+    assert(strcmp(cover_transform_log.service_url, "http://romm.local/image") == 0);
     assert(vp_queue_download(item, &config, "ux0:data/vitaplus/downloads/fzero.sfc", transfer_backend));
-    assert(transfer_log.calls == 2);
+    assert(transfer_log.calls == 1);
     assert(strcmp(transfer_log.url, "http://romm.local/api/file/fzero.sfc") == 0);
     assert(strcmp(transfer_log.bearer, "rmm_test_token") == 0);
     (void)snprintf(item->cover_url, sizeof(item->cover_url), "https://cdn.example/fzero.png");
-    assert(vp_cache_cover(item, &config, "ux0:data/vitaplus/cache/fzero.png", transfer_backend));
-    assert(strcmp(transfer_log.bearer, "") == 0);
+    (void)snprintf(config.image_proxy_url, sizeof(config.image_proxy_url), "http://romm.local:8090/image");
+    assert(vp_cache_cover(item, &config, "ux0:data/vitaplus/cache/fzero.png", cover_transform_backend));
+    assert(strcmp(cover_transform_log.bearer, "") == 0);
+    assert(strcmp(cover_transform_log.service_url, "http://romm.local:8090/image") == 0);
     (void)snprintf(item->download_url, sizeof(item->download_url), "https://cdn.example/fzero.sfc");
     assert(vp_queue_download(item, &config, "ux0:data/vitaplus/downloads/fzero.sfc", transfer_backend));
     assert(strcmp(transfer_log.bearer, "") == 0);

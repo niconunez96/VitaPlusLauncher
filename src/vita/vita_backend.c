@@ -17,6 +17,8 @@
 #include <string.h>
 
 #define VP_STAGE_DIR "ux0:data/vitaplus/staging/latest"
+#define VP_COVER_SOURCE_LIMIT (8 * 1024 * 1024)
+#define VP_COVER_SOURCE_PATH "ux0:data/vitaplus/cache/covers/.source-image"
 
 typedef struct {
     char *buffer;
@@ -30,6 +32,13 @@ typedef struct {
 } DownloadFile;
 
 typedef struct {
+    SceUID fd;
+    size_t used;
+    size_t limit;
+    bool exceeded;
+} LimitedDownloadFile;
+
+typedef struct {
     VpTransferProgressFn callback;
     void *context;
 } TransferProgress;
@@ -38,6 +47,7 @@ typedef struct {
 static char extract_block[8192];
 /* RomM cover paths carry a timestamp with a literal space; libcurl rejects such URLs. */
 static char transfer_url[VP_URL * 3];
+static char transform_url[VP_URL * 3];
 static char last_error[VP_TEXT];
 
 const char *vp_vita_last_error(void) {
@@ -116,6 +126,27 @@ static size_t file_write(char *data, size_t size, size_t count, void *context) {
         written += (size_t)result;
     }
     return bytes;
+}
+
+static size_t limited_file_write(char *data, size_t size, size_t count, void *context) {
+    LimitedDownloadFile *file = context;
+    size_t bytes = size * count;
+    if (bytes > file->limit - file->used) {
+        file->exceeded = true;
+        return 0;
+    }
+    if (file_write(data, size, count, &(DownloadFile){file->fd}) != bytes) return 0;
+    file->used += bytes;
+    return bytes;
+}
+
+static size_t file_read(char *data, size_t size, size_t count, void *context) {
+    DownloadFile *file = context;
+    int result;
+    size_t requested = size * count;
+    if (requested == 0) return 0;
+    result = sceIoRead(file->fd, data, requested);
+    return result > 0 ? (size_t)result : 0;
 }
 
 static int transfer_progress(void *context, curl_off_t total, curl_off_t downloaded,
@@ -383,6 +414,106 @@ bool vp_vita_transfer_with_progress(const char *url, const char *bearer_token,
     }
     if (action == VP_TRANSFER_INSTALL_VPK) installed = promote_vpk(destination);
     return installed;
+}
+
+bool vp_vita_transform_cover(const char *source_url, const char *bearer_token,
+                             const char *service_url, const char *destination, void *context) {
+    CURL *curl = NULL;
+    struct curl_slist *headers = NULL;
+    LimitedDownloadFile source = {-1, 0, VP_COVER_SOURCE_LIMIT, false};
+    DownloadFile output = {-1};
+    DownloadFile upload = {-1};
+    SceIoStat source_stat;
+    CURLcode result;
+    long status = 0;
+    bool downloaded = false;
+    char authorization[VP_TEXT + 32];
+    char endpoint[VP_URL + 64];
+    const char *separator;
+    (void)context;
+    if (source_url == NULL || service_url == NULL || destination == NULL ||
+        !valid_bearer_token(bearer_token) ||
+        !vp_url_escape(source_url, transfer_url, sizeof(transfer_url))) return false;
+
+    source.fd = sceIoOpen(VP_COVER_SOURCE_PATH, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+    if (source.fd < 0) return false;
+    curl = curl_easy_init();
+    if (curl == NULL) goto finish;
+    if (bearer_token != NULL && bearer_token[0] != '\0') {
+        (void)snprintf(authorization, sizeof(authorization), "Authorization: Bearer %s", bearer_token);
+        headers = curl_slist_append(headers, authorization);
+        if (headers == NULL) goto finish;
+    }
+    curl_easy_setopt(curl, CURLOPT_URL, transfer_url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, limited_file_write);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &source);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION,
+                     bearer_token != NULL && bearer_token[0] != '\0' ? 0L : 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    result = curl_easy_perform(curl);
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    curl_slist_free_all(headers);
+    headers = NULL;
+    curl_easy_cleanup(curl);
+    curl = NULL;
+    sceIoClose(source.fd);
+    source.fd = -1;
+    downloaded = result == CURLE_OK && status >= 200 && status < 300 && source.used > 0;
+    if (!downloaded) {
+        if (source.exceeded)
+            (void)snprintf(last_error, sizeof(last_error), "Imagen original supera 8 MiB");
+        else
+            set_last_error(result, status, NULL, false);
+        record_http_failure(transfer_url, result, status, NULL, false);
+        goto finish;
+    }
+
+    separator = strchr(service_url, '?') != NULL ? "&" : "?";
+    if (snprintf(endpoint, sizeof(endpoint), "%s%swidth=256&height=320", service_url, separator) >=
+            (int)sizeof(endpoint) ||
+        !vp_url_escape(endpoint, transform_url, sizeof(transform_url)) ||
+        sceIoGetstat(VP_COVER_SOURCE_PATH, &source_stat) < 0 || source_stat.st_size <= 0 ||
+        source_stat.st_size > VP_COVER_SOURCE_LIMIT || !make_parent_dirs(destination)) goto finish;
+    upload.fd = sceIoOpen(VP_COVER_SOURCE_PATH, SCE_O_RDONLY, 0);
+    output.fd = sceIoOpen(destination, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+    if (upload.fd < 0 || output.fd < 0) goto finish;
+    curl = curl_easy_init();
+    if (curl == NULL) goto finish;
+    headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
+    if (headers == NULL) goto finish;
+    curl_easy_setopt(curl, CURLOPT_URL, transform_url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, file_read);
+    curl_easy_setopt(curl, CURLOPT_READDATA, &upload);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)source_stat.st_size);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, file_write);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &output);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    result = curl_easy_perform(curl);
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    downloaded = result == CURLE_OK && status >= 200 && status < 300;
+    if (!downloaded) {
+        set_last_error(result, status, NULL, false);
+        record_http_failure(transform_url, result, status, NULL, false);
+    }
+
+finish:
+    if (headers != NULL) curl_slist_free_all(headers);
+    if (curl != NULL) curl_easy_cleanup(curl);
+    if (source.fd >= 0) sceIoClose(source.fd);
+    if (upload.fd >= 0) sceIoClose(upload.fd);
+    if (output.fd >= 0) sceIoClose(output.fd);
+    (void)sceIoRemove(VP_COVER_SOURCE_PATH);
+    if (!downloaded) (void)sceIoRemove(destination);
+    return downloaded;
 }
 
 bool vp_vita_launch_uri(const char *uri) {

@@ -147,6 +147,7 @@ typedef struct {
 typedef struct {
     char base_url[VP_URL];
     char token[VP_TEXT];
+    char image_proxy_url[VP_URL];
 } VpRommConfig;
 
 typedef struct {
@@ -177,6 +178,14 @@ typedef struct {
     VpTransferFn execute;
     void *context;
 } VpTransferBackend;
+
+typedef bool (*VpCoverTransformFn)(const char *source_url, const char *bearer_token,
+                                   const char *service_url, const char *destination, void *context);
+
+typedef struct {
+    VpCoverTransformFn execute;
+    void *context;
+} VpCoverTransformBackend;
 
 void vp_app_init(VpApp *app);
 void vp_app_cycle_screen(VpApp *app, int direction);
@@ -238,7 +247,7 @@ bool vp_romm_exchange_pair_code(VpRommConfig *config, const char *code,
 bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
                   VpFetchBackend backend);
 bool vp_cache_cover(const VpItem *item, const VpRommConfig *config, const char *destination,
-                    VpTransferBackend backend);
+                    VpCoverTransformBackend backend);
 bool vp_homebrew_import(VpCatalog *catalog, const char *json);
 bool vp_homebrew_sync(VpCatalog *catalog, const VpHomebrewConfig *config,
                       VpFetchBackend backend);

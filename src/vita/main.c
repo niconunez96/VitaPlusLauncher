@@ -213,6 +213,8 @@ static void load_providers(VpApp *app) {
         trim(equals);
         if (strcmp(line, "romm_url") == 0) (void)snprintf(romm_config.base_url, sizeof(romm_config.base_url), "%s", equals);
         else if (strcmp(line, "romm_token") == 0) (void)snprintf(romm_config.token, sizeof(romm_config.token), "%s", equals);
+        else if (strcmp(line, "image_proxy_url") == 0)
+            (void)snprintf(romm_config.image_proxy_url, sizeof(romm_config.image_proxy_url), "%s", equals);
         else if (strcmp(line, "homebrew_catalog") == 0)
             (void)snprintf(homebrew_config.catalog_url, sizeof(homebrew_config.catalog_url), "%s", equals);
         else if (strcmp(line, "active_theme") == 0)
@@ -235,8 +237,9 @@ static bool save_romm_config(void) {
     (void)sceIoMkdir("ux0:data/vitaplus", 0777);
     file = fopen(VP_CONFIG_PATH, "w");
     if (file == NULL) return false;
-    (void)fprintf(file, "romm_url=%s\nromm_token=%s\nhomebrew_catalog=%s\nactive_theme=%s\n",
-                  romm_config.base_url, romm_config.token, homebrew_config.catalog_url, active_theme);
+    (void)fprintf(file, "romm_url=%s\nromm_token=%s\nimage_proxy_url=%s\nhomebrew_catalog=%s\nactive_theme=%s\n",
+                   romm_config.base_url, romm_config.token, romm_config.image_proxy_url,
+                   homebrew_config.catalog_url, active_theme);
     for (index = 0; index < launch_config.count; index++) {
         const VpLaunchProfile *profile = &launch_config.profiles[index];
         (void)fprintf(file, "launch_%s=%s:%s\n", profile->platform, profile->titleid,
@@ -338,11 +341,12 @@ static void *background_job_run(void *context) {
         if (succeeded) (void)save_catalog_cache(&job->catalog, &config);
     } else {
         VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
+        VpCoverTransformBackend cover_backend = {vp_vita_transform_cover, NULL};
         const char *target = kind == VP_JOB_DOWNLOAD_ROM ? partial : destination;
         if (kind == VP_JOB_INSTALL_HOMEBREW)
             succeeded = vp_install_homebrew(&item, target, transfer_backend);
         else if (kind == VP_JOB_FETCH_COVER)
-            succeeded = vp_cache_cover(&item, &config, target, transfer_backend);
+            succeeded = vp_cache_cover(&item, &config, target, cover_backend);
         else
             succeeded = vp_vita_transfer_with_progress(item.download_url, config.token, target,
                                                        VP_TRANSFER_DOWNLOAD, download_progress,
@@ -682,7 +686,7 @@ static void safe_id(const char *id, char *destination, size_t capacity) {
 static void cover_path_for(const char *id, char *path, size_t capacity) {
     char safe[VP_TEXT];
     safe_id(id, safe, sizeof(safe));
-    (void)snprintf(path, capacity, "ux0:data/vitaplus/cache/covers/libretro-%s.png", safe);
+    (void)snprintf(path, capacity, "ux0:data/vitaplus/cache/covers/processed-%s.png", safe);
 }
 
 static VpCoverSlot *find_cover_slot(const char *id) {
@@ -758,15 +762,13 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
     for (index = 0; index < count; index++) {
         const VpItem *item = &app->catalog.items[indexes[index]];
         VpCoverSlot *slot;
-        VpItem thumbnail_item;
+        VpItem source_item;
         char path[VP_PATH];
-        char thumbnail_url[VP_URL];
         FILE *file;
-        if (!vp_libretro_thumbnail_url(item, thumbnail_url, sizeof(thumbnail_url))) continue;
+        if (item->cover_url[0] == '\0') continue;
         if (cover_is_unavailable(item->id)) continue;
         if (find_cover_slot(item->id) != NULL) continue;
-        thumbnail_item = *item;
-        (void)snprintf(thumbnail_item.cover_url, sizeof(thumbnail_item.cover_url), "%s", thumbnail_url);
+        source_item = *item;
         cover_path_for(item->id, path, sizeof(path));
         file = fopen(path, "rb");
         if (file != NULL) {
@@ -778,7 +780,7 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
             slot->attempted = true;
             return;
         }
-        if (!background_job_start(VP_JOB_FETCH_COVER, &thumbnail_item, path, NULL)) {
+        if (!background_job_start(VP_JOB_FETCH_COVER, &source_item, path, NULL)) {
             continue;
         }
         return;

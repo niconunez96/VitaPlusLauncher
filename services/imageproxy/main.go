@@ -1,0 +1,184 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"image"
+	"image/color"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+)
+
+const (
+	defaultMaxSourceBytes int64 = 8 << 20
+	defaultMaxPixels            = 16_000_000
+	maxOutputDimension          = 1024
+)
+
+var (
+	errSourceTooLarge = errors.New("source image is too large")
+	errTooManyPixels  = errors.New("source image has too many pixels")
+)
+
+// Config controls image-size limits.
+type Config struct {
+	MaxSourceBytes  int64
+	MaxPixels       int
+	MaxOutputPixels int
+}
+
+type handler struct {
+	maxSourceBytes  int64
+	maxPixels       int
+	maxOutputPixels int
+}
+
+func main() {
+	address := os.Getenv("IMAGE_PROXY_ADDR")
+	if address == "" {
+		address = ":8090"
+	}
+	log.Printf("imageproxy listening on %s", address)
+	if err := http.ListenAndServe(address, NewHandler(Config{})); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// NewHandler serves POST /image?width=<px>&height=<px> with image bytes as its body.
+func NewHandler(config Config) http.Handler {
+	if config.MaxSourceBytes <= 0 {
+		config.MaxSourceBytes = defaultMaxSourceBytes
+	}
+	if config.MaxPixels <= 0 {
+		config.MaxPixels = defaultMaxPixels
+	}
+	if config.MaxOutputPixels <= 0 {
+		config.MaxOutputPixels = maxOutputDimension * maxOutputDimension
+	}
+	return &handler{
+		maxSourceBytes:  config.MaxSourceBytes,
+		maxPixels:       config.MaxPixels,
+		maxOutputPixels: config.MaxOutputPixels,
+	}
+}
+
+func (service *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writer.Header().Set("Allow", http.MethodPost)
+		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if request.URL.Path != "/image" {
+		http.NotFound(writer, request)
+		return
+	}
+
+	width, height, err := parseDimensions(request)
+	if err != nil {
+		http.Error(writer, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if width*height > service.maxOutputPixels {
+		http.Error(writer, "requested output is too large", http.StatusBadRequest)
+		return
+	}
+
+	source, err := service.decodeImage(request.Body)
+	if err != nil {
+		service.writeImageError(writer, err)
+		return
+	}
+	writer.Header().Set("Content-Type", "image/png")
+	writer.Header().Set("Cache-Control", "public, max-age=86400")
+	if err := png.Encode(writer, centerCropAndScale(source, width, height)); err != nil {
+		log.Printf("encode image: %v", err)
+	}
+}
+
+func parseDimensions(request *http.Request) (int, int, error) {
+	width, err := parseDimension(request.URL.Query().Get("width"))
+	if err != nil {
+		return 0, 0, fmt.Errorf("width: %w", err)
+	}
+	height, err := parseDimension(request.URL.Query().Get("height"))
+	if err != nil {
+		return 0, 0, fmt.Errorf("height: %w", err)
+	}
+	return width, height, nil
+}
+
+func parseDimension(raw string) (int, error) {
+	dimension, err := strconv.Atoi(raw)
+	if err != nil || dimension < 1 || dimension > maxOutputDimension {
+		return 0, fmt.Errorf("must be an integer from 1 to %d", maxOutputDimension)
+	}
+	return dimension, nil
+}
+
+func (service *handler) decodeImage(body io.Reader) (image.Image, error) {
+	contents, err := io.ReadAll(io.LimitReader(body, service.maxSourceBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read image body: %w", err)
+	}
+	if int64(len(contents)) > service.maxSourceBytes {
+		return nil, errSourceTooLarge
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(contents))
+	if err != nil {
+		return nil, fmt.Errorf("decode image header: %w", err)
+	}
+	if config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > int64(service.maxPixels) {
+		return nil, errTooManyPixels
+	}
+	decoded, _, err := image.Decode(bytes.NewReader(contents))
+	if err != nil {
+		return nil, fmt.Errorf("decode image: %w", err)
+	}
+	return decoded, nil
+}
+
+func (service *handler) writeImageError(writer http.ResponseWriter, err error) {
+	status := http.StatusUnprocessableEntity
+	message := "could not decode source image"
+	if errors.Is(err, errSourceTooLarge) || errors.Is(err, errTooManyPixels) {
+		message = err.Error()
+	}
+	http.Error(writer, message, status)
+	log.Printf("image request failed: %v", err)
+}
+
+func centerCropAndScale(source image.Image, targetWidth, targetHeight int) *image.NRGBA {
+	bounds := source.Bounds()
+	sourceWidth, sourceHeight := bounds.Dx(), bounds.Dy()
+	cropWidth, cropHeight := sourceWidth, sourceHeight
+	if int64(sourceWidth)*int64(targetHeight) > int64(sourceHeight)*int64(targetWidth) {
+		cropWidth = sourceHeight * targetWidth / targetHeight
+	} else {
+		cropHeight = sourceWidth * targetHeight / targetWidth
+	}
+	startX := bounds.Min.X + (sourceWidth-cropWidth)/2
+	startY := bounds.Min.Y + (sourceHeight-cropHeight)/2
+
+	destination := image.NewNRGBA(image.Rect(0, 0, targetWidth, targetHeight))
+	for y := 0; y < targetHeight; y++ {
+		sourceY := startY + y*cropHeight/targetHeight
+		for x := 0; x < targetWidth; x++ {
+			sourceX := startX + x*cropWidth/targetWidth
+			destination.SetNRGBA(x, y, color.NRGBAModel.Convert(source.At(sourceX, sourceY)).(color.NRGBA))
+		}
+	}
+	return destination
+}
+
+// Register standard-library decoders used by image.Decode.
+var (
+	_ = gif.GIF{}
+	_ = jpeg.DefaultQuality
+)

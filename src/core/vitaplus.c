@@ -1186,12 +1186,23 @@ static const char *vp_romm_token_for_url(const VpItem *item, const VpRommConfig 
     return config->token;
 }
 
+static bool vp_image_proxy_url(const VpRommConfig *config, char *destination, size_t capacity) {
+    if (config == NULL || destination == NULL || capacity == 0) return false;
+    if (config->image_proxy_url[0] != '\0') {
+        vp_copy(destination, capacity, config->image_proxy_url);
+        return destination[0] != '\0';
+    }
+    return vp_join_url(destination, capacity, config->base_url, "/image");
+}
+
 bool vp_cache_cover(const VpItem *item, const VpRommConfig *config, const char *destination,
-                    VpTransferBackend backend) {
+                    VpCoverTransformBackend backend) {
+    char service_url[VP_URL];
     if (item == NULL || destination == NULL || item->cover_url[0] == '\0' ||
-        backend.execute == NULL) return false;
+        config == NULL || backend.execute == NULL ||
+        !vp_image_proxy_url(config, service_url, sizeof(service_url))) return false;
     return backend.execute(item->cover_url, vp_romm_token_for_url(item, config, item->cover_url),
-                           destination, VP_TRANSFER_DOWNLOAD, backend.context);
+                           service_url, destination, backend.context);
 }
 
 bool vp_homebrew_import(VpCatalog *catalog, const char *json) {

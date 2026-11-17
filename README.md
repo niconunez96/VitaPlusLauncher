@@ -68,7 +68,9 @@ ux0:data/vitaplus/cache/covers/
 ux0:data/vitaplus/downloads/<plataforma>/
 ```
 
-Las carátulas se obtienen directamente desde Libretro Thumbnails y se activan automáticamente.
+Las carátulas se descargan desde RomM, se envían como bytes al servicio de imágenes y se activan automáticamente.
+El servicio queda en el mismo host que RomM por defecto (`<romm_url>/image`) o podés establecer
+`image_proxy_url` en `config.ini` si usás otro puerto o proxy inverso.
 Antes de decodificarlas, VitaPlus acepta sólo PNG RGB/RGBA de 8 bits, sin interlace, de hasta
 `512×512` píxeles y `512 KiB`; una imagen ausente o rechazada conserva la navegación sin artwork.
 Si una instalación anterior tiene artwork problemático, borrá `ux0:data/vitaplus/cache/covers/`.
