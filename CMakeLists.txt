@@ -22,6 +22,8 @@ if(DEFINED ENV{VITASDK})
 
   add_executable(vitaplus
     src/vita/main.c
+    src/vita/ui_presentation.c
+    src/vita/ui_renderer.c
     src/vita/vita_backend.c)
   # Catch large automatic buffers before they can exhaust a Vita thread stack.
   target_compile_options(vitaplus PRIVATE -Werror=frame-larger-than=16384)
@@ -32,11 +34,24 @@ if(DEFINED ENV{VITASDK})
   configure_file("$ENV{VITASDK}/arm-vita-eabi/ssl/openssl.cnf"
     "${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf" COPYONLY)
   vita_create_self(eboot.bin vitaplus UNSAFE)
+  # Explicit inventory: a missing generated icon must fail packaging, not ship silently.
+  set(VP_AURORA_ASSETS wallpaper emblem
+    platform_nes platform_famicom platform_snes platform_gameboy platform_gba platform_nds
+    platform_genesis platform_mastersystem platform_gamegear platform_psx platform_psp platform_vita
+    platform_arcade platform_pce platform_atari2600 platform_wonderswan platform_homebrew platform_generic
+    ui_library ui_home ui_store ui_settings ui_download ui_check ui_star ui_search
+    ui_play ui_back ui_grid ui_list ui_carousel ui_sync ui_key ui_folder)
+  set(VP_AURORA_FILES)
+  foreach(asset IN LISTS VP_AURORA_ASSETS)
+    list(APPEND VP_AURORA_FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/assets/aurora/${asset}.png" "assets/aurora/${asset}.png")
+  endforeach()
   vita_create_vpk(vitaplus.vpk ${VITA_TITLEID} eboot.bin
     VERSION ${VITA_VERSION}
      NAME ${VITA_APP_NAME}
      FILE ${CMAKE_CURRENT_SOURCE_DIR}/themes/default/theme.ini assets/default/theme.ini
-          ${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf openssl.cnf)
+           ${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf openssl.cnf
+           ${VP_AURORA_FILES})
 else()
   message(STATUS "VITASDK not set: only vitaplus_core is configured")
 endif()

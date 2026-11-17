@@ -2,7 +2,7 @@
 
 VitaPlus es una shell/launcher homebrew para PS Vita/PSTV: reúne biblioteca local, catálogo personal de RomM y tiendas de homebrew en una interfaz navegable con temas y vistas intercambiables.
 
-> Estado: las fases 1–3 están implementadas y probadas en el núcleo portable; el frontend Vita2D muestra la shell inicial. Falta compilar y conectar los adaptadores Vita de HTTP/instalación en hardware porque VitaSDK no está instalado en este entorno.
+> Estado: núcleo portable y frontend Vita2D implementados. La interfaz Aurora incluye assets originales, navegación por consola y descargas en segundo plano. Compilación VPK con VitaSDK/Docker; las comprobaciones visuales en hardware siguen siendo necesarias.
 
 ## Alcance
 
@@ -19,9 +19,9 @@ La tienda oficial de PlayStation queda como acceso delegado a la aplicación ofi
 ```text
 include/                 API portable del núcleo
 src/core/                modelo, catálogo, temas, providers y transferencias
-src/vita/                frontend Vita2D inicial
+src/vita/                frontend Vita2D y presentación Aurora
 themes/default/          tema base editable
-assets/fonts/            tipografía incluida en el VPK
+assets/aurora/           iconos y fondo originales generados con FLUX
 tests/                   pruebas host con gcc
 docs/                    arquitectura y contrato de providers
 ```
@@ -53,10 +53,28 @@ cmake --build build/vita
 
 El VPK queda en `build/vita/vitaplus.vpk`.
 
-La interfaz incluye **Noto Sans Regular** y la usa para todos los textos. Esto evita
-depender de la fuente PGF predeterminada y mantiene el texto legible en la pantalla
-nativa de 960×544 de una PS Vita. La fuente se distribuye bajo SIL Open Font License
-1.1; la licencia incluida queda en `assets/licenses/NotoSans-OFL-1.1.txt`.
+La interfaz usa la fuente **PGF del sistema**, en la pantalla nativa de 960×544.
+Los archivos Noto Sans conservados en `assets/fonts/` no se cargan ni se incluyen en el VPK.
+
+## Interfaz Aurora
+
+Aurora mantiene la estructura núcleo/proveedores/frontend y los controles existentes:
+flechas para navegar, `X` para abrir/descargar/jugar, círculo para volver, `L/R` para
+cambiar de sección, triángulo para cambiar de vista y cuadrado para favoritos.
+En Ajustes, triángulo conserva la acción de canjear y guardar el código de RomM.
+
+- Biblioteca con iconos de controles por consola, colores propios y foco animado.
+- Vistas de juegos `grid`, `list` y `carousel`, fondo con artwork y carátulas de RomM.
+- Dock de secciones, ajustes visuales, progreso de descargas y avisos temporales.
+- 36 PNG originales de FLUX incluidos; funcionan sin conexión y tienen fallback si falta un archivo.
+
+Los temas anteriores siguen usando sus cinco colores y su vista inicial. Las opciones
+adicionales son `ui_motion_ms` (0–600, 0 desactiva el movimiento), `ui_radius` (6–20)
+y `ui_wallpaper_alpha` (0–255). Los valores inválidos se ignoran. `card_width` y
+`card_height` se conservan por compatibilidad; la grilla usa geometría fija de 4×2
+para mantener la navegación. No se agregaron funciones de búsqueda ni una tienda funcional.
+
+Preparación de assets, pruebas y verificación visual: [docs/aurora-ui.md](docs/aurora-ui.md).
 
 ## Configuración en Vita
 

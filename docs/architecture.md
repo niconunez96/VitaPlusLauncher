@@ -28,4 +28,17 @@ Vita2D UI
 
 ## Temas
 
-Los temas son datos y assets. No ejecutan scripts. `theme.ini` define colores, layout y dimensiones de cards; un tema posterior podrá incluir iconos, fondos y audio.
+Los temas son datos y assets. No ejecutan scripts. `theme.ini` define colores y vista
+inicial; la presentación Aurora lee además `ui_motion_ms`, `ui_radius` y
+`ui_wallpaper_alpha`. La geometría fija de las grillas mantiene las columnas que
+usa la navegación. Los campos históricos de tamaño de cards se conservan por compatibilidad.
+
+`src/vita/main.c` conserva entrada, trabajos y caché de carátulas. Construye un
+`VpUiFrame` de solo lectura; `ui_renderer.c` dibuja las pantallas sin modificar el
+catálogo. `ui_presentation.c` contiene alias visuales, geometría y opciones de tema
+comprobables en host. No se cambió el formato persistido ni los contratos de proveedores.
+
+Los iconos originales se incluyen en `app0:assets/aurora/`. El renderer decodifica
+como máximo un nuevo asset por frame, valida tamaño/formato y no reintenta archivos
+ausentes. Los 36 PNG suman menos de 2 MiB de píxeles RGBA; la asignación real de GPU
+puede ser mayor por alineación. La caché de carátulas sigue separada y limitada a 8.
