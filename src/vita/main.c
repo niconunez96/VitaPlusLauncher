@@ -199,6 +199,8 @@ static void *background_job_run(void *context) {
     char destination[VP_PATH];
     char partial[VP_PATH + 8];
     bool succeeded = false;
+    bool romm_requested = false;
+    bool homebrew_requested = false;
     char error[VP_TEXT];
 
     pthread_mutex_lock(&job->mutex);
@@ -218,12 +220,17 @@ static void *background_job_run(void *context) {
             VpRommPairBackend pair_backend = {vp_vita_exchange_pair_code, NULL};
             succeeded = vp_romm_exchange_pair_code(&config, pair_code, pair_backend);
             if (!succeeded) goto finish;
-            succeeded = vp_romm_sync(&job->catalog, &config, fetch_backend);
-        } else if (config.base_url[0] != '\0' && config.token[0] != '\0') {
+        }
+        if (config.base_url[0] != '\0' && config.token[0] != '\0') {
+            romm_requested = true;
             succeeded = vp_romm_sync(&job->catalog, &config, fetch_backend);
         }
-        if (homebrew.catalog_url[0] != '\0')
-            succeeded = vp_homebrew_sync(&job->catalog, &homebrew, fetch_backend) || succeeded;
+        if (homebrew.catalog_url[0] != '\0') {
+            homebrew_requested = true;
+            succeeded = vp_homebrew_sync(&job->catalog, &homebrew, fetch_backend) &&
+                        (!romm_requested || succeeded);
+        }
+        if (!romm_requested && !homebrew_requested) succeeded = false;
     } else {
         VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
         const char *target = kind == VP_JOB_DOWNLOAD_ROM ? partial : destination;

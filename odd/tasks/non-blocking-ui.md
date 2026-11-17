@@ -31,10 +31,10 @@ Check: code review against foreground call paths plus manual hardware smoke test
 
 ## Tasks
 
-- [x] T1 - Add a Vita background-job state machine and foreground-safe status publication. Specs S1, S6. Route: inline (large tracked task; no parallel unit). Evidence: serialized pthread worker with immutable job inputs and foreground-only result publication. Commit: pending.
-- [x] T2 - Move provider sync and deferred artwork loading out of the foreground UI loop. Specs S1-S3, S6. Route: inline (depends on T1). Evidence: provider sync and thumbnail transfers only execute in `background_job_run`; render queues at most one cover request. Commit: pending.
-- [x] T3 - Move download/install transfers to the job system and group ROM paths by sanitized platform. Specs S1, S4-S6. Route: inline (depends on T1). Evidence: `make test` RED → GREEN for platform paths; ROM and homebrew transfers run through the worker. Commit: pending.
-- [x] T4 - Add regression coverage and run host/Vita verification. Specs S1-S6. Route: inline. Evidence: `make test` PASS; `./scripts/build-vpk.sh --clean` PASS (VPK SHA-256 `172227660c60508a8a45dcd27352c5aa3dd65f85542c4ee7cf989ddbdf0cff45`). Manual physical-Vita smoke test pending. Commit: pending.
+- [x] T1 - Add a Vita background-job state machine and foreground-safe status publication. Specs S1, S6. Route: inline (large tracked task; no parallel unit). Evidence: serialized pthread worker with immutable job inputs and foreground-only result publication. Commit: `1a9c72d`.
+- [x] T2 - Move provider sync and deferred artwork loading out of the foreground UI loop. Specs S1-S3, S6. Route: inline (depends on T1). Evidence: provider sync and thumbnail transfers only execute in `background_job_run`; render queues at most one cover request. Commit: `1a9c72d`.
+- [x] T3 - Move download/install transfers to the job system and group ROM paths by sanitized platform. Specs S1, S4-S6. Route: inline (depends on T1). Evidence: `make test` RED → GREEN for platform paths; ROM and homebrew transfers run through the worker. Commit: `1a9c72d`.
+- [x] T4 - Add regression coverage and run host/Vita verification. Specs S1-S6. Route: inline. Evidence: `make test` PASS; `./scripts/build-vpk.sh --clean` PASS (VPK SHA-256 `26e34abae6eb34df9446d80c725ea5e4866b9149c7c4f26d7d9adf96466c2034`). Manual physical-Vita smoke test pending. Commit: `1a9c72d`.
 
 ## Log
 
@@ -54,3 +54,4 @@ L4 (2026-11-17): Implementation plan: (1) introduce one serialized worker job wi
 L5 (2026-11-17): T3 started with RED/GREEN coverage for platform-grouped download paths. `make test` first failed at `test_download_paths`, then passed after `vp_item_download_path` added the sanitized platform directory. Existing RomM transfer expectation was updated to the new path.
 L6 (2026-11-17): A single pthread worker now owns all provider syncs, pair-code exchange, ROM transfers, VPK installs, and Libretro thumbnail HTTP transfers. The UI queues work and polls terminal results; it never calls a network backend in input/render paths. The catalog is published only after a completed sync, and lists are cached rather than re-sorted on every frame. Texture creation remains on the UI thread because Vita2D owns rendering resources there; network and file transfer no longer stall navigation.
 L7 (2026-11-17): Verification: `make test` PASS and `./scripts/build-vpk.sh --clean` PASS. The VPK must still be smoke-tested on physical hardware while syncing, opening platforms, downloading, and switching screens.
+L8 (2026-11-17): Follow-up verification after hardening provider-sync failure handling: `make test` PASS and `./scripts/build-vpk.sh --clean` PASS (VPK SHA-256 `26e34abae6eb34df9446d80c725ea5e4866b9149c7c4f26d7d9adf96466c2034`). Native receipt review is pending because its preflight requires handling the unrelated untracked `.atl/` inventory.
