@@ -48,6 +48,23 @@ func TestImageRejectsNonPOSTRequests(t *testing.T) {
 	}
 }
 
+func TestHealthReturnsOK(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Config{})
+	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if response.Body.String() != "ok\n" {
+		t.Fatalf("body = %q, want %q", response.Body.String(), "ok\n")
+	}
+}
+
 func sourcePNG(t *testing.T, width, height int) *bytes.Reader {
 	t.Helper()
 	source := image.NewRGBA(image.Rect(0, 0, width, height))

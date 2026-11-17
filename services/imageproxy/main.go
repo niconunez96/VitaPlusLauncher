@@ -70,6 +70,11 @@ func NewHandler(config Config) http.Handler {
 }
 
 func (service *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	if request.Method == http.MethodGet && request.URL.Path == "/health" {
+		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = writer.Write([]byte("ok\n"))
+		return
+	}
 	if request.Method != http.MethodPost {
 		writer.Header().Set("Allow", http.MethodPost)
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
