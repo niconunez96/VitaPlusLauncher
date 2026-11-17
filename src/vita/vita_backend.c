@@ -8,6 +8,7 @@
 #include <psp2/sysmodule.h>
 #include <zip.h>
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -28,9 +29,51 @@ typedef struct {
 
 /* Transfers run on the single UI thread, so this avoids an oversized Vita stack frame. */
 static char extract_block[8192];
+static char last_error[VP_TEXT];
+
+const char *vp_vita_last_error(void) {
+    return last_error[0] != '\0' ? last_error : "sin detalle";
+}
+
+static void set_last_error(CURLcode result, long status, const char *response) {
+    const char *message;
+    if (result != CURLE_OK) {
+        (void)snprintf(last_error, sizeof(last_error), "Red: %s", curl_easy_strerror(result));
+    } else if (status == 422 && response != NULL &&
+               (message = strstr(response, "\"msg\":\"")) != NULL) {
+        message += strlen("\"msg\":\"");
+        (void)snprintf(last_error, sizeof(last_error), "HTTP 422: %.96s", message);
+    } else if (status < 200 || status >= 300) {
+        (void)snprintf(last_error, sizeof(last_error), "HTTP %ld", status);
+    } else {
+        last_error[0] = '\0';
+    }
+}
+
+static void record_http_failure(const char *url, CURLcode result, long status, const char *response) {
+    FILE *log;
+    if (result == CURLE_OK && status >= 200 && status < 300) return;
+    (void)sceIoMkdir("ux0:data", 0777);
+    (void)sceIoMkdir("ux0:data/vitaplus", 0777);
+    log = fopen("ux0:data/vitaplus/network.log", "a");
+    if (log == NULL) return;
+    (void)fprintf(log, "url=%s\ncurl=%d (%s)\nhttp=%ld\nbody=%.1024s\n---\n",
+                  url != NULL ? url : "(null)", (int)result, curl_easy_strerror(result), status,
+                  response != NULL ? response : "");
+    fclose(log);
+}
 
 static bool valid_bearer_token(const char *token) {
     return token == NULL || (strchr(token, '\r') == NULL && strchr(token, '\n') == NULL);
+}
+
+static bool valid_pair_code(const char *code) {
+    const char *cursor;
+    if (code == NULL || code[0] == '\0') return false;
+    for (cursor = code; *cursor != '\0'; cursor++) {
+        if (!isalnum((unsigned char)*cursor) && *cursor != '-') return false;
+    }
+    return true;
 }
 
 static size_t response_write(char *data, size_t size, size_t count, void *context) {
@@ -186,6 +229,46 @@ bool vp_vita_fetch(const char *url, const char *bearer_token,
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION,
                      bearer_token != NULL && bearer_token[0] != '\0' ? 0L : 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    result = curl_easy_perform(curl);
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    set_last_error(result, status, response);
+    record_http_failure(url, result, status, response);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    return result == CURLE_OK && status >= 200 && status < 300 && buffer.used > 0;
+}
+
+bool vp_vita_exchange_pair_code(const char *url, const char *code,
+                                char *response, size_t response_capacity, void *context) {
+    CURL *curl;
+    struct curl_slist *headers = NULL;
+    ResponseBuffer buffer;
+    char payload[VP_TEXT + 16];
+    CURLcode result;
+    long status = 0;
+    (void)context;
+    if (url == NULL || response == NULL || response_capacity == 0 || !valid_pair_code(code)) return false;
+    if (snprintf(payload, sizeof(payload), "{\"code\":\"%s\"}", code) >= (int)sizeof(payload)) return false;
+    response[0] = '\0';
+    buffer.buffer = response;
+    buffer.capacity = response_capacity;
+    buffer.used = 0;
+    curl = curl_easy_init();
+    if (curl == NULL) return false;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    if (headers == NULL) {
+        curl_easy_cleanup(curl);
+        return false;
+    }
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, response_write);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);

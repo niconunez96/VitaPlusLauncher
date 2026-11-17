@@ -5,6 +5,9 @@
 
 bool vp_vita_fetch(const char *url, const char *bearer_token,
                    char *response, size_t response_capacity, void *context);
+const char *vp_vita_last_error(void);
+bool vp_vita_exchange_pair_code(const char *url, const char *code,
+                                char *response, size_t response_capacity, void *context);
 bool vp_vita_transfer(const char *url, const char *bearer_token, const char *destination,
                       VpTransferAction action, void *context);
 

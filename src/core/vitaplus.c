@@ -474,6 +474,24 @@ static void vp_romm_normalize_urls(VpCatalog *catalog, const char *base_url) {
     }
 }
 
+bool vp_romm_exchange_pair_code(VpRommConfig *config, const char *code,
+                                VpRommPairBackend backend) {
+    char url[VP_URL];
+    char token[VP_TEXT];
+    const char *cursor;
+    if (config == NULL || config->base_url[0] == '\0' || code == NULL || code[0] == '\0' ||
+        backend.execute == NULL) return false;
+    for (cursor = code; *cursor != '\0'; cursor++) {
+        if (!isalnum((unsigned char)*cursor) && *cursor != '-') return false;
+    }
+    if (!vp_join_url(url, sizeof(url), config->base_url, "/api/client-tokens/exchange") ||
+        !backend.execute(url, code, vp_fetch_response, sizeof(vp_fetch_response), backend.context) ||
+        !vp_json_value(vp_fetch_response, vp_fetch_response + strlen(vp_fetch_response),
+                       "raw_token", token, sizeof(token))) return false;
+    vp_copy(config->token, sizeof(config->token), token);
+    return true;
+}
+
 bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
                   VpFetchBackend backend) {
     char url[VP_URL];
@@ -482,11 +500,15 @@ bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
     if (catalog == NULL || config == NULL || config->base_url[0] == '\0' ||
         config->token[0] == '\0' || backend.execute == NULL) return false;
     for (offset = 0; offset < VP_MAX_ITEMS && catalog->count < VP_MAX_ITEMS; offset++) {
-        char path[64];
+        char path[VP_URL];
         char total_text[32];
         size_t page_items;
         unsigned long total = 0;
-        (void)snprintf(path, sizeof(path), "/api/roms?limit=1&offset=%zu", offset);
+        /* Vita's snprintf does not support the C99 z length modifier. */
+        (void)snprintf(path, sizeof(path),
+                       "/api/roms?limit=1&offset=%u&with_char_index=false"
+                       "&with_filter_values=false&with_rom_id_index=false",
+                       (unsigned)offset);
         if (!vp_join_url(url, sizeof(url), config->base_url, path)) return false;
         if (!backend.execute(url, config->token, vp_fetch_response, sizeof(vp_fetch_response), backend.context)) return false;
         if (!vp_romm_import_page(catalog, vp_fetch_response, &page_items)) return false;
