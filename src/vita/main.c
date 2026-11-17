@@ -1079,6 +1079,7 @@ int main(void) {
     unsigned int previous = 0;
     vita2d_pgf *font;
     bool curl_cleanup_allowed;
+    bool rendered_once = false;
     vp_app_init(&app);
     vp_download_queue_init(&download_queue);
     vp_launch_config_init(&launch_config);
@@ -1146,14 +1147,17 @@ int main(void) {
             }
         }
         /* swap_buffers queues presentation; it is not a fence for texture retirement
-         * or the temporary vertex pool that start_drawing resets. */
-        vita2d_wait_rendering_done();
+         * or the temporary vertex pool that start_drawing resets. Skip the fence on
+         * the first frame: no rendering is in flight yet, and calling it there
+         * crashes Vita3K before the first draw. */
+        if (rendered_once) vita2d_wait_rendering_done();
         prepare_shell(&frame, font, &app, pressed);
         vita2d_start_drawing();
         vita2d_clear_screen();
         vp_ui_render(&frame);
         vita2d_end_drawing();
         vita2d_swap_buffers();
+        rendered_once = true;
     }
     vp_ui_shutdown();
     {
