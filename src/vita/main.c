@@ -1,6 +1,8 @@
 #include <psp2/ctrl.h>
+#include <psp2/ime_dialog.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
+#include <psp2/sysmodule.h>
 #include <vita2d.h>
 
 #include <stdio.h>
@@ -18,11 +20,8 @@ static VpApp app;
 static VpCatalog romm_catalog;
 static char active_theme[VP_TEXT] = "default";
 static int settings_field;
-static size_t settings_character;
-static bool settings_editing;
-
-static const char settings_characters[] =
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:/._-?&=@";
+static bool settings_ime_active;
+static SceWChar16 settings_ime_buffer[VP_URL];
 
 static void trim(char *value) {
     size_t length;
@@ -115,38 +114,62 @@ static bool sync_romm_catalog(VpApp *app) {
     return true;
 }
 
-static void settings_append_selected_character(void) {
-    char *value = settings_field == 0 ? romm_config.base_url : romm_config.token;
-    size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_config.token);
-    size_t length = strlen(value);
-    if (length + 1 < capacity) {
-        value[length] = settings_characters[settings_character];
-        value[length + 1] = '\0';
-    }
+static void settings_text_to_wide(const char *source, SceWChar16 *destination, size_t capacity) {
+    size_t index;
+    for (index = 0; index + 1 < capacity && source[index] != '\0'; index++)
+        destination[index] = (unsigned char)source[index];
+    destination[index] = 0;
 }
 
-static void settings_backspace(void) {
-    char *value = settings_field == 0 ? romm_config.base_url : romm_config.token;
-    size_t length = strlen(value);
-    if (length > 0) value[length - 1] = '\0';
+static void settings_wide_to_text(const SceWChar16 *source, char *destination, size_t capacity) {
+    size_t index;
+    for (index = 0; index + 1 < capacity && source[index] != 0; index++)
+        destination[index] = source[index] <= 0x7f ? (char)source[index] : '?';
+    destination[index] = '\0';
+}
+
+static bool settings_start_ime(void) {
+    SceImeDialogParam param;
+    const char *value = settings_field == 0 ? romm_config.base_url : romm_config.token;
+    size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_config.token);
+    settings_text_to_wide(value, settings_ime_buffer, sizeof(settings_ime_buffer) / sizeof(settings_ime_buffer[0]));
+    sceImeDialogParamInit(&param);
+    param.supportedLanguages = SCE_IME_LANGUAGE_ENGLISH | SCE_IME_LANGUAGE_SPANISH;
+    param.type = settings_field == 0 ? SCE_IME_TYPE_URL : SCE_IME_TYPE_BASIC_LATIN;
+    param.option = SCE_IME_OPTION_NO_AUTO_CAPITALIZATION;
+    param.dialogMode = SCE_IME_DIALOG_DIALOG_MODE_WITH_CANCEL;
+    param.textBoxMode = settings_field == 0 ? SCE_IME_DIALOG_TEXTBOX_MODE_DEFAULT : SCE_IME_DIALOG_TEXTBOX_MODE_PASSWORD;
+    param.title = settings_field == 0 ? (const SceWChar16 *)u"URL de RomM" : (const SceWChar16 *)u"Token de RomM";
+    param.maxTextLength = (SceUInt32)(capacity - 1);
+    param.initialText = settings_ime_buffer;
+    param.inputTextBuffer = settings_ime_buffer;
+    param.enterLabel = SCE_IME_ENTER_LABEL_GO;
+    settings_ime_active = sceImeDialogInit(&param) >= 0;
+    return settings_ime_active;
+}
+
+static void settings_finish_ime(VpApp *app) {
+    SceImeDialogResult result;
+    if (!settings_ime_active || sceImeDialogGetStatus() != SCE_COMMON_DIALOG_STATUS_FINISHED) return;
+    memset(&result, 0, sizeof(result));
+    (void)sceImeDialogGetResult(&result);
+    if (result.button == SCE_IME_DIALOG_BUTTON_ENTER) {
+        char *value = settings_field == 0 ? romm_config.base_url : romm_config.token;
+        size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_config.token);
+        settings_wide_to_text(settings_ime_buffer, value, capacity);
+        (void)snprintf(app->notice, sizeof(app->notice), "%s actualizado; Triangulo guarda y sincroniza",
+                       settings_field == 0 ? "URL" : "Token");
+    }
+    (void)sceImeDialogTerm();
+    settings_ime_active = false;
 }
 
 static void handle_settings_input(VpApp *app, unsigned int pressed) {
-    if (!settings_editing) {
-        if (pressed & SCE_CTRL_UP) settings_field = 0;
-        if (pressed & SCE_CTRL_DOWN) settings_field = 1;
-        if (pressed & SCE_CTRL_CROSS) settings_editing = true;
-        return;
-    }
-    if (pressed & SCE_CTRL_LEFT) {
-        settings_character = (settings_character + strlen(settings_characters) - 1) % strlen(settings_characters);
-    }
-    if (pressed & SCE_CTRL_RIGHT) settings_character = (settings_character + 1) % strlen(settings_characters);
-    if (pressed & SCE_CTRL_CROSS) settings_append_selected_character();
-    if (pressed & SCE_CTRL_SQUARE) settings_backspace();
-    if (pressed & SCE_CTRL_CIRCLE) settings_editing = false;
+    if (pressed & SCE_CTRL_UP) settings_field = 0;
+    if (pressed & SCE_CTRL_DOWN) settings_field = 1;
+    if (pressed & SCE_CTRL_CROSS && !settings_start_ime())
+        (void)snprintf(app->notice, sizeof(app->notice), "No se pudo abrir el teclado de PS Vita");
     if (pressed & SCE_CTRL_TRIANGLE) {
-        settings_editing = false;
         if (!save_romm_config()) {
             (void)snprintf(app->notice, sizeof(app->notice), "No se pudo guardar la configuracion");
         } else if (sync_romm_catalog(app)) {
@@ -194,26 +217,28 @@ static void download_selected(VpApp *app) {
 }
 
 static void draw_list(vita2d_pgf *font, const VpApp *app, unsigned int text, unsigned int accent) {
-    int index;
-    for (index = 0; index < (int)app->catalog.count && index < 6; index++) {
+    size_t start = (app->selected_item / 6) * 6;
+    size_t index;
+    for (index = start; index < app->catalog.count && index < start + 6; index++) {
         const VpItem *item = &app->catalog.items[index];
-        int y = 150 + index * 34;
-        unsigned int color = ((size_t)index == app->selected_item) ? accent : text;
+        int y = 150 + (int)(index - start) * 34;
+        unsigned int color = (index == app->selected_item) ? accent : text;
         vita2d_pgf_draw_textf(font, 42, y, color, 0.82f, "%c %s%s [%s]",
-                              ((size_t)index == app->selected_item) ? '>' : ' ',
+                              (index == app->selected_item) ? '>' : ' ',
                               item->favorite ? "* " : "", item->title, item->platform);
     }
 }
 
 static void draw_grid(vita2d_pgf *font, const VpApp *app, unsigned int surface, unsigned int text, unsigned int accent) {
-    int index;
-    for (index = 0; index < (int)app->catalog.count && index < 6; index++) {
+    size_t start = (app->selected_item / 6) * 6;
+    size_t index;
+    for (index = start; index < app->catalog.count && index < start + 6; index++) {
         const VpItem *item = &app->catalog.items[index];
-        int column = index % 3;
-        int row = index / 3;
+        int column = (int)(index - start) % 3;
+        int row = (int)(index - start) / 3;
         int x = 34 + column * 302;
         int y = 145 + row * 142;
-        unsigned int border = ((size_t)index == app->selected_item) ? accent : surface;
+        unsigned int border = (index == app->selected_item) ? accent : surface;
         vita2d_draw_rectangle(x, y, 278, 120, border);
         vita2d_draw_rectangle(x + 3, y + 3, 272, 114, surface);
         vita2d_pgf_draw_text(font, x + 12, y + 38, text, 0.78f, item->title);
@@ -258,14 +283,10 @@ static void draw_shell(vita2d_pgf *font, const VpApp *app) {
         vita2d_pgf_draw_textf(font, 42, 258, settings_field == 1 ? accent : text, 0.68f,
                               "%sToken: %s", token_prefix,
                               romm_config.token[0] != '\0' ? "********" : "(sin configurar)");
-        if (settings_editing) {
-            vita2d_pgf_draw_textf(font, 42, 314, accent, 0.72f, "Caracter: %c", settings_characters[settings_character]);
-            vita2d_pgf_draw_text(font, 42, 348, muted, 0.58f,
-                                 "Izq/Der caracter | X agrega | Cuadrado borra | Triangulo guarda y sincroniza | Circulo termina");
-        } else {
-            vita2d_pgf_draw_text(font, 42, 314, muted, 0.58f,
-                                 "Arriba/Abajo campo | X editar | Usa token de solo lectura de RomM");
-        }
+        vita2d_pgf_draw_text(font, 42, 314, muted, 0.58f,
+                             "Arriba/Abajo campo | X abre teclado PS Vita | Triangulo guarda y sincroniza");
+        vita2d_pgf_draw_text(font, 42, 342, muted, 0.58f,
+                             "Usa un token de solo lectura de RomM");
         if (app->notice[0] != '\0') vita2d_pgf_draw_text(font, 42, 410, RGBA(245, 174, 79, 255), 0.62f, app->notice);
         return;
     }
@@ -298,17 +319,26 @@ int main(void) {
     load_providers(&app);
     vita2d_init();
     font = vita2d_load_default_pgf();
+    (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
     for (;;) {
         unsigned int pressed;
+        if (settings_ime_active) {
+            (void)vita2d_common_dialog_update();
+            settings_finish_ime(&app);
+            if (settings_ime_active) {
+                vita2d_swap_buffers();
+                continue;
+            }
+        }
         sceCtrlPeekBufferPositive(0, &pad, 1);
         pressed = pad.buttons & ~previous;
         previous = pad.buttons;
         if (pressed & SCE_CTRL_START) break;
         if (app.active_screen == VP_SCREEN_SETTINGS) {
             handle_settings_input(&app, pressed);
-            if (!settings_editing && (pressed & SCE_CTRL_LTRIGGER)) vp_app_cycle_screen(&app, -1);
-            if (!settings_editing && (pressed & SCE_CTRL_RTRIGGER)) vp_app_cycle_screen(&app, 1);
+            if (!settings_ime_active && (pressed & SCE_CTRL_LTRIGGER)) vp_app_cycle_screen(&app, -1);
+            if (!settings_ime_active && (pressed & SCE_CTRL_RTRIGGER)) vp_app_cycle_screen(&app, 1);
         } else {
             if (pressed & SCE_CTRL_LTRIGGER) vp_app_cycle_screen(&app, -1);
             if (pressed & SCE_CTRL_RTRIGGER) vp_app_cycle_screen(&app, 1);

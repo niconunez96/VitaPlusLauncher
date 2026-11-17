@@ -26,6 +26,9 @@ typedef struct {
     SceUID fd;
 } DownloadFile;
 
+/* Transfers run on the single UI thread, so this avoids an oversized Vita stack frame. */
+static char extract_block[8192];
+
 static bool valid_bearer_token(const char *token) {
     return token == NULL || (strchr(token, '\r') == NULL && strchr(token, '\n') == NULL);
 }
@@ -109,8 +112,7 @@ static bool extract_vpk(const char *vpk_path, const char *destination) {
             return false;
         }
         for (;;) {
-            char block[8192];
-            zip_int64_t read_count = zip_fread(input, block, sizeof(block));
+            zip_int64_t read_count = zip_fread(input, extract_block, sizeof(extract_block));
             size_t offset = 0;
             if (read_count < 0) {
                 zip_fclose(input);
@@ -120,7 +122,7 @@ static bool extract_vpk(const char *vpk_path, const char *destination) {
             }
             if (read_count == 0) break;
             while (offset < (size_t)read_count) {
-                int write_count = sceIoWrite(output_fd, block + offset, (size_t)read_count - offset);
+                int write_count = sceIoWrite(output_fd, extract_block + offset, (size_t)read_count - offset);
                 if (write_count <= 0) {
                     zip_fclose(input);
                     sceIoClose(output_fd);

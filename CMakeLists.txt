@@ -24,7 +24,7 @@ if(DEFINED ENV{VITASDK})
     src/vita/main.c
     src/vita/vita_backend.c)
   target_link_libraries(vitaplus vitaplus_core vita2d curl zip z zstd bz2 lzma ssl crypto m pthread
-    SceCtrl_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub SceCommonDialog_stub
+    SceCtrl_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub SceCommonDialog_stub SceIme_stub
     ScePgf_stub SceIofilemgr_stub SceNet_stub SceNetCtl_stub SceSsl_stub SceSysmodule_stub
     ScePromoterUtil_stub_weak)
   vita_create_self(eboot.bin vitaplus UNSAFE)
