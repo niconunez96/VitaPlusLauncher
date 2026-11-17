@@ -150,7 +150,7 @@ static void test_romm_sync(void) {
     vp_catalog_init(&catalog);
     assert(vp_romm_sync(&catalog, &config, fetch_backend));
     assert(fetch_log.calls == 1);
-    assert(strcmp(fetch_log.url, "http://romm.local/api/roms?limit=1&offset=0") == 0);
+    assert(strcmp(fetch_log.url, "http://romm.local/api/roms?limit=1&offset=0&with_char_index=false&with_filter_values=false&with_rom_id_index=false") == 0);
     assert(strcmp(fetch_log.bearer, "rmm_test_token") == 0);
     item = vp_catalog_find(&catalog, "romm:99");
     assert(item != NULL);
@@ -191,8 +191,8 @@ static void test_romm_pagination(void) {
     assert(vp_romm_sync(&catalog, &config, backend));
     assert(catalog.count == 2);
     assert(fetch_log.calls == 2);
-    assert(strcmp(fetch_log.urls[0], "https://romm.local/api/roms?limit=1&offset=0") == 0);
-    assert(strcmp(fetch_log.urls[1], "https://romm.local/api/roms?limit=1&offset=1") == 0);
+    assert(strcmp(fetch_log.urls[0], "https://romm.local/api/roms?limit=1&offset=0&with_char_index=false&with_filter_values=false&with_rom_id_index=false") == 0);
+    assert(strcmp(fetch_log.urls[1], "https://romm.local/api/roms?limit=1&offset=1&with_char_index=false&with_filter_values=false&with_rom_id_index=false") == 0);
     assert(strcmp(fetch_log.bearer, "rmm_test_token") == 0);
     assert(vp_catalog_find(&catalog, "romm:1") != NULL);
     assert(vp_catalog_find(&catalog, "romm:2") != NULL);
