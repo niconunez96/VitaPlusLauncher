@@ -27,8 +27,10 @@ IMAGE_PROXY_DOMAIN=images.example.com
 ```
 
 Point that hostname's DNS A/AAAA record at the Dokploy server, then deploy. The compose
-file joins Dokploy's external `dokploy-network`, exposes no host port, enables TLS through
-Traefik, and has no persistent volume because the service is stateless.
+file joins Dokploy's external `dokploy-network`, enables TLS through Traefik, and has no
+persistent volume because the service is stateless. It also publishes port `8090` directly,
+so `http://<server-ip>:8090/` is available for connectivity checks when the server firewall
+allows it.
 
 Set VitaPlus's `image_proxy_url` to the public endpoint, including its path:
 
