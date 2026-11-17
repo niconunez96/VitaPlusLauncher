@@ -31,10 +31,10 @@ Check: code review against foreground call paths plus manual hardware smoke test
 
 ## Tasks
 
-- [x] T1 - Add a Vita background-job state machine and foreground-safe status publication. Specs S1, S6. Route: inline (large tracked task; no parallel unit). Evidence: serialized pthread worker with immutable job inputs and foreground-only result publication. Commit: `1a9c72d`.
-- [x] T2 - Move provider sync and deferred artwork loading out of the foreground UI loop. Specs S1-S3, S6. Route: inline (depends on T1). Evidence: provider sync and thumbnail transfers only execute in `background_job_run`; render queues at most one cover request. Commit: `1a9c72d`.
-- [x] T3 - Move download/install transfers to the job system and group ROM paths by sanitized platform. Specs S1, S4-S6. Route: inline (depends on T1). Evidence: `make test` RED → GREEN for platform paths; ROM and homebrew transfers run through the worker. Commit: `1a9c72d`.
-- [x] T4 - Add regression coverage and run host/Vita verification. Specs S1-S6. Route: inline. Evidence: `make test` PASS; `./scripts/build-vpk.sh --clean` PASS (VPK SHA-256 `26e34abae6eb34df9446d80c725ea5e4866b9149c7c4f26d7d9adf96466c2034`). Manual physical-Vita smoke test pending. Commit: `1a9c72d`.
+- [x] T1 - Add a Vita background-job state machine and foreground-safe status publication. Specs S1, S6. Route: inline (large tracked task; no parallel unit). Evidence: serialized pthread worker with immutable job inputs and foreground-only result publication. Commits: `1a9c72d`, `3fac064`.
+- [x] T2 - Move provider sync and deferred artwork loading out of the foreground UI loop. Specs S1-S3, S6. Route: inline (depends on T1). Evidence: provider sync and thumbnail transfers only execute in `background_job_run`; render queues at most one cover request. Commits: `1a9c72d`, `3fac064`.
+- [x] T3 - Move download/install transfers to the job system and group ROM paths by sanitized platform. Specs S1, S4-S6. Route: inline (depends on T1). Evidence: `make test` RED → GREEN for platform paths; ROM and homebrew transfers run through the worker. Commits: `1a9c72d`, `3fac064`.
+- [x] T4 - Add regression coverage and run host/Vita verification. Specs S1-S6. Route: inline. Evidence: `make test` PASS; `./scripts/build-vpk.sh --clean` PASS (VPK SHA-256 `26e34abae6eb34df9446d80c725ea5e4866b9149c7c4f26d7d9adf96466c2034`). Manual physical-Vita smoke test pending. Commits: `1a9c72d`, `3fac064`.
 
 ## Log
 
