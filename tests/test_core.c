@@ -8,35 +8,48 @@ typedef struct {
     int calls;
     VpTransferAction last_action;
     char url[VP_URL];
+    char bearer[VP_TEXT];
     char destination[VP_PATH];
 } TransferLog;
 
 typedef struct {
     int calls;
     char url[VP_URL];
+    char urls[4][VP_URL];
     char bearer[VP_TEXT];
     const char *payload;
+    const char *pages[4];
+    size_t page_count;
+    int fail_at_call;
 } FetchLog;
 
 static bool fake_fetch(const char *url, const char *bearer_token,
                        char *response, size_t response_capacity, void *context) {
     FetchLog *log = context;
     const char *payload = log->payload != NULL ? log->payload :
-        "{\"items\":[{\"id\":99,\"name\":\"F-Zero\",\"platform_slug\":\"snes\","
+        "{\"total\":1,\"items\":[{\"id\":99,\"name\":\"F-Zero\",\"platform_slug\":\"snes\","
         "\"url_cover\":\"/assets/fzero.png\",\"download_url\":\"/api/file/fzero.sfc\"}]}";
+    if ((size_t)log->calls < log->page_count) payload = log->pages[log->calls];
+    if (log->fail_at_call > 0 && log->calls == log->fail_at_call) {
+        log->calls++;
+        return false;
+    }
     log->calls++;
     (void)snprintf(log->url, sizeof(log->url), "%s", url);
+    if (log->calls <= (int)(sizeof(log->urls) / sizeof(log->urls[0])))
+        (void)snprintf(log->urls[log->calls - 1], sizeof(log->urls[0]), "%s", url);
     (void)snprintf(log->bearer, sizeof(log->bearer), "%s", bearer_token);
     (void)snprintf(response, response_capacity, "%s", payload);
     return true;
 }
 
-static bool fake_transfer(const char *url, const char *destination,
+static bool fake_transfer(const char *url, const char *bearer_token, const char *destination,
                           VpTransferAction action, void *context) {
     TransferLog *log = context;
     log->calls++;
     log->last_action = action;
     (void)snprintf(log->url, sizeof(log->url), "%s", url);
+    (void)snprintf(log->bearer, sizeof(log->bearer), "%s", bearer_token != NULL ? bearer_token : "");
     (void)snprintf(log->destination, sizeof(log->destination), "%s", destination);
     return true;
 }
@@ -137,14 +150,74 @@ static void test_romm_sync(void) {
     vp_catalog_init(&catalog);
     assert(vp_romm_sync(&catalog, &config, fetch_backend));
     assert(fetch_log.calls == 1);
-    assert(strcmp(fetch_log.url, "http://romm.local/api/roms?limit=250&offset=0") == 0);
+    assert(strcmp(fetch_log.url, "http://romm.local/api/roms?limit=1&offset=0") == 0);
     assert(strcmp(fetch_log.bearer, "rmm_test_token") == 0);
     item = vp_catalog_find(&catalog, "romm:99");
     assert(item != NULL);
     assert(strcmp(item->cover_url, "http://romm.local/assets/fzero.png") == 0);
-    assert(vp_cache_cover(item, "ux0:data/vitaplus/cache/fzero.png", transfer_backend));
+    assert(vp_cache_cover(item, &config, "ux0:data/vitaplus/cache/fzero.png", transfer_backend));
     assert(transfer_log.calls == 1);
     assert(strcmp(transfer_log.url, "http://romm.local/assets/fzero.png") == 0);
+    assert(strcmp(transfer_log.bearer, "rmm_test_token") == 0);
+    assert(vp_queue_download(item, &config, "ux0:data/vitaplus/downloads/fzero.sfc", transfer_backend));
+    assert(transfer_log.calls == 2);
+    assert(strcmp(transfer_log.url, "http://romm.local/api/file/fzero.sfc") == 0);
+    assert(strcmp(transfer_log.bearer, "rmm_test_token") == 0);
+    (void)snprintf(item->cover_url, sizeof(item->cover_url), "https://cdn.example/fzero.png");
+    assert(vp_cache_cover(item, &config, "ux0:data/vitaplus/cache/fzero.png", transfer_backend));
+    assert(strcmp(transfer_log.bearer, "") == 0);
+    (void)snprintf(item->download_url, sizeof(item->download_url), "https://cdn.example/fzero.sfc");
+    assert(vp_queue_download(item, &config, "ux0:data/vitaplus/downloads/fzero.sfc", transfer_backend));
+    assert(strcmp(transfer_log.bearer, "") == 0);
+}
+
+static void test_romm_pagination(void) {
+    VpCatalog catalog;
+    FetchLog fetch_log;
+    VpFetchBackend backend;
+    VpRommConfig config;
+
+    memset(&fetch_log, 0, sizeof(fetch_log));
+    memset(&config, 0, sizeof(config));
+    fetch_log.page_count = 2;
+    fetch_log.pages[0] = "{\"total\":2,\"items\":[{\"id\":1,\"name\":\"First\"}]}";
+    fetch_log.pages[1] = "{\"total\":2,\"items\":[{\"id\":2,\"name\":\"Second\"}]}";
+    (void)snprintf(config.base_url, sizeof(config.base_url), "https://romm.local");
+    (void)snprintf(config.token, sizeof(config.token), "rmm_test_token");
+    backend.execute = fake_fetch;
+    backend.context = &fetch_log;
+    vp_catalog_init(&catalog);
+
+    assert(vp_romm_sync(&catalog, &config, backend));
+    assert(catalog.count == 2);
+    assert(fetch_log.calls == 2);
+    assert(strcmp(fetch_log.urls[0], "https://romm.local/api/roms?limit=1&offset=0") == 0);
+    assert(strcmp(fetch_log.urls[1], "https://romm.local/api/roms?limit=1&offset=1") == 0);
+    assert(strcmp(fetch_log.bearer, "rmm_test_token") == 0);
+    assert(vp_catalog_find(&catalog, "romm:1") != NULL);
+    assert(vp_catalog_find(&catalog, "romm:2") != NULL);
+}
+
+static void test_romm_sync_fails_after_partial_page(void) {
+    VpCatalog catalog;
+    FetchLog fetch_log;
+    VpFetchBackend backend;
+    VpRommConfig config;
+
+    memset(&fetch_log, 0, sizeof(fetch_log));
+    memset(&config, 0, sizeof(config));
+    fetch_log.fail_at_call = 1;
+    fetch_log.page_count = 1;
+    fetch_log.pages[0] = "{\"total\":2,\"items\":[{\"id\":1,\"name\":\"First\"}]}";
+    (void)snprintf(config.base_url, sizeof(config.base_url), "https://romm.local");
+    (void)snprintf(config.token, sizeof(config.token), "rmm_test_token");
+    backend.execute = fake_fetch;
+    backend.context = &fetch_log;
+    vp_catalog_init(&catalog);
+
+    assert(!vp_romm_sync(&catalog, &config, backend));
+    assert(catalog.count == 1);
+    assert(fetch_log.calls == 2);
 }
 
 static void test_homebrew_store_sync(void) {
@@ -195,8 +268,9 @@ static void test_providers_and_transfers(void) {
     homebrew = vp_catalog_find(&catalog, "homebrew:vitaplus");
     assert(rom != NULL && homebrew != NULL);
     assert(strcmp(rom->platform, "snes") == 0);
-    assert(vp_queue_download(rom, "ux0:data/vitaplus/downloads/snes/game.sfc", backend));
+    assert(vp_queue_download(rom, NULL, "ux0:data/vitaplus/downloads/snes/game.sfc", backend));
     assert(log.calls == 1 && log.last_action == VP_TRANSFER_DOWNLOAD);
+    assert(log.bearer[0] == '\0');
     assert(vp_install_homebrew(homebrew, "ux0:data/vitaplus/downloads/VitaPlus.vpk", backend));
     assert(log.calls == 2 && log.last_action == VP_TRANSFER_INSTALL_VPK);
     assert(!vp_install_homebrew(rom, "ux0:data/vitaplus/x", backend));
@@ -209,6 +283,8 @@ int main(void) {
     test_theme();
     test_local_library();
     test_romm_sync();
+    test_romm_pagination();
+    test_romm_sync_fails_after_partial_page();
     test_homebrew_store_sync();
     test_providers_and_transfers();
     puts("vitaplus core tests: PASS");

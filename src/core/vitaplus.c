@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The Vita frontend is single-threaded; keeping the remote payload off its small stack avoids
+ * a startup crash when providers are configured. */
+static char vp_fetch_response[32768];
+
 static void vp_copy(char *destination, size_t capacity, const char *source) {
     if (capacity == 0) return;
     if (source == NULL) {
@@ -393,38 +397,127 @@ static bool vp_join_url(char *destination, size_t capacity,
     return true;
 }
 
-bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
-                  VpFetchBackend backend) {
-    char url[VP_URL];
-    char response[32768];
-    size_t index;
-    if (catalog == NULL || config == NULL || config->base_url[0] == '\0' ||
-        config->token[0] == '\0' || backend.execute == NULL) return false;
-    if (!vp_join_url(url, sizeof(url), config->base_url, "/api/roms?limit=250&offset=0")) return false;
-    if (!backend.execute(url, config->token, response, sizeof(response), backend.context)) return false;
-    if (!vp_romm_import(catalog, response)) return false;
+static const char *vp_array_end(const char *begin) {
+    int depth = 0;
+    bool quoted = false;
+    const char *cursor;
+    for (cursor = begin; *cursor != '\0'; cursor++) {
+        if (*cursor == '"' && (cursor == begin || cursor[-1] != '\\')) quoted = !quoted;
+        if (quoted) continue;
+        if (*cursor == '[') depth++;
+        if (*cursor == ']') {
+            depth--;
+            if (depth == 0) return cursor + 1;
+        }
+    }
+    return NULL;
+}
 
+static bool vp_romm_import_page(VpCatalog *catalog, const char *json, size_t *item_count) {
+    const char *items_key;
+    const char *cursor;
+    const char *end;
+    size_t imported = 0;
+    size_t found = 0;
+    if (catalog == NULL || json == NULL || item_count == NULL) return false;
+    *item_count = 0;
+    items_key = strstr(json, "\"items\"");
+    if (items_key == NULL || (cursor = strchr(items_key, '[')) == NULL) return false;
+    end = vp_array_end(cursor);
+    if (end == NULL) return false;
+    while ((cursor = strchr(cursor, '{')) != NULL && cursor < end) {
+        const char *object_end = vp_object_end(cursor);
+        VpItem item;
+        char remote_id[VP_TEXT - 24];
+        if (object_end == NULL || object_end > end) return false;
+        found++;
+        vp_default_item(&item);
+        item.source = VP_SOURCE_ROMM;
+        item.kind = VP_KIND_ROM;
+        if (!vp_json_value(cursor, object_end, "id", remote_id, sizeof(remote_id))) {
+            cursor = object_end;
+            continue;
+        }
+        (void)snprintf(item.id, sizeof(item.id), "romm:%s", remote_id);
+        vp_copy(item.remote_id, sizeof(item.remote_id), remote_id);
+        if (!vp_json_value(cursor, object_end, "name", item.title, sizeof(item.title)))
+            (void)vp_json_value(cursor, object_end, "title", item.title, sizeof(item.title));
+        if (item.title[0] == '\0') {
+            cursor = object_end;
+            continue;
+        }
+        if (!vp_json_value(cursor, object_end, "platform", item.platform, sizeof(item.platform)) &&
+            !vp_json_value(cursor, object_end, "platform_slug", item.platform, sizeof(item.platform)))
+            vp_copy(item.platform, sizeof(item.platform), "romm");
+        (void)vp_json_value(cursor, object_end, "description", item.description, sizeof(item.description));
+        if (!vp_json_value(cursor, object_end, "download_url", item.download_url, sizeof(item.download_url)))
+            (void)vp_json_value(cursor, object_end, "url", item.download_url, sizeof(item.download_url));
+        if (!vp_json_value(cursor, object_end, "cover_url", item.cover_url, sizeof(item.cover_url)))
+            (void)vp_json_value(cursor, object_end, "url_cover", item.cover_url, sizeof(item.cover_url));
+        if (vp_catalog_add(catalog, &item) != NULL) imported++;
+        cursor = object_end;
+    }
+    *item_count = found;
+    return imported > 0 || found == 0;
+}
+
+static void vp_romm_normalize_urls(VpCatalog *catalog, const char *base_url) {
+    size_t index;
     for (index = 0; index < catalog->count; index++) {
         VpItem *item = &catalog->items[index];
         char absolute[VP_URL];
         if (item->source != VP_SOURCE_ROMM) continue;
-        if (item->cover_url[0] != '\0' && item->cover_url[0] == '/' &&
-            vp_join_url(absolute, sizeof(absolute), config->base_url, item->cover_url)) {
+        if (item->cover_url[0] == '/' && vp_join_url(absolute, sizeof(absolute), base_url, item->cover_url))
             vp_copy(item->cover_url, sizeof(item->cover_url), absolute);
-        }
-        if (item->download_url[0] != '\0' && item->download_url[0] == '/' &&
-            vp_join_url(absolute, sizeof(absolute), config->base_url, item->download_url)) {
+        if (item->download_url[0] == '/' && vp_join_url(absolute, sizeof(absolute), base_url, item->download_url))
             vp_copy(item->download_url, sizeof(item->download_url), absolute);
-        }
     }
-    return true;
 }
 
-bool vp_cache_cover(const VpItem *item, const char *destination,
+bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
+                  VpFetchBackend backend) {
+    char url[VP_URL];
+    size_t offset;
+    bool imported = false;
+    if (catalog == NULL || config == NULL || config->base_url[0] == '\0' ||
+        config->token[0] == '\0' || backend.execute == NULL) return false;
+    for (offset = 0; offset < VP_MAX_ITEMS && catalog->count < VP_MAX_ITEMS; offset++) {
+        char path[64];
+        char total_text[32];
+        size_t page_items;
+        unsigned long total = 0;
+        (void)snprintf(path, sizeof(path), "/api/roms?limit=1&offset=%zu", offset);
+        if (!vp_join_url(url, sizeof(url), config->base_url, path)) return false;
+        if (!backend.execute(url, config->token, vp_fetch_response, sizeof(vp_fetch_response), backend.context)) return false;
+        if (!vp_romm_import_page(catalog, vp_fetch_response, &page_items)) return false;
+        imported = imported || page_items > 0;
+        vp_romm_normalize_urls(catalog, config->base_url);
+        if (page_items == 0) break;
+        if (vp_json_value(vp_fetch_response, vp_object_end(vp_fetch_response), "total", total_text, sizeof(total_text)))
+            total = strtoul(total_text, NULL, 10);
+        if (total > 0 && offset + 1 >= total) break;
+    }
+    return imported;
+}
+
+static const char *vp_romm_token_for_url(const VpItem *item, const VpRommConfig *config,
+                                         const char *url) {
+    size_t base_length;
+    if (item == NULL || config == NULL || url == NULL || item->source != VP_SOURCE_ROMM ||
+        config->token[0] == '\0' || config->base_url[0] == '\0') return NULL;
+    base_length = strlen(config->base_url);
+    while (base_length > 0 && config->base_url[base_length - 1] == '/') base_length--;
+    if (strncmp(url, config->base_url, base_length) != 0 ||
+        (url[base_length] != '\0' && url[base_length] != '/')) return NULL;
+    return config->token;
+}
+
+bool vp_cache_cover(const VpItem *item, const VpRommConfig *config, const char *destination,
                     VpTransferBackend backend) {
     if (item == NULL || destination == NULL || item->cover_url[0] == '\0' ||
         backend.execute == NULL) return false;
-    return backend.execute(item->cover_url, destination, VP_TRANSFER_DOWNLOAD, backend.context);
+    return backend.execute(item->cover_url, vp_romm_token_for_url(item, config, item->cover_url),
+                           destination, VP_TRANSFER_DOWNLOAD, backend.context);
 }
 
 bool vp_homebrew_import(VpCatalog *catalog, const char *json) {
@@ -433,23 +526,24 @@ bool vp_homebrew_import(VpCatalog *catalog, const char *json) {
 
 bool vp_homebrew_sync(VpCatalog *catalog, const VpHomebrewConfig *config,
                       VpFetchBackend backend) {
-    char response[32768];
     if (catalog == NULL || config == NULL || config->catalog_url[0] == '\0' ||
         backend.execute == NULL) return false;
-    if (!backend.execute(config->catalog_url, "", response, sizeof(response), backend.context)) return false;
-    return vp_homebrew_import(catalog, response);
+    if (!backend.execute(config->catalog_url, "", vp_fetch_response, sizeof(vp_fetch_response), backend.context)) return false;
+    return vp_homebrew_import(catalog, vp_fetch_response);
 }
 
-bool vp_queue_download(const VpItem *item, const char *destination,
+bool vp_queue_download(const VpItem *item, const VpRommConfig *config, const char *destination,
                        VpTransferBackend backend) {
     if (item == NULL || destination == NULL || item->download_url[0] == '\0' ||
         backend.execute == NULL) return false;
-    return backend.execute(item->download_url, destination, VP_TRANSFER_DOWNLOAD, backend.context);
+    return backend.execute(item->download_url,
+                           vp_romm_token_for_url(item, config, item->download_url),
+                           destination, VP_TRANSFER_DOWNLOAD, backend.context);
 }
 
 bool vp_install_homebrew(const VpItem *item, const char *destination,
                          VpTransferBackend backend) {
     if (item == NULL || item->source != VP_SOURCE_HOMEBREW || destination == NULL ||
         item->download_url[0] == '\0' || backend.execute == NULL) return false;
-    return backend.execute(item->download_url, destination, VP_TRANSFER_INSTALL_VPK, backend.context);
+    return backend.execute(item->download_url, NULL, destination, VP_TRANSFER_INSTALL_VPK, backend.context);
 }

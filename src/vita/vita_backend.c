@@ -26,6 +26,13 @@ typedef struct {
     SceUID fd;
 } DownloadFile;
 
+/* Transfers run on the single UI thread, so this avoids an oversized Vita stack frame. */
+static char extract_block[8192];
+
+static bool valid_bearer_token(const char *token) {
+    return token == NULL || (strchr(token, '\r') == NULL && strchr(token, '\n') == NULL);
+}
+
 static size_t response_write(char *data, size_t size, size_t count, void *context) {
     ResponseBuffer *buffer = context;
     size_t bytes = size * count;
@@ -105,8 +112,7 @@ static bool extract_vpk(const char *vpk_path, const char *destination) {
             return false;
         }
         for (;;) {
-            char block[8192];
-            zip_int64_t read_count = zip_fread(input, block, sizeof(block));
+            zip_int64_t read_count = zip_fread(input, extract_block, sizeof(extract_block));
             size_t offset = 0;
             if (read_count < 0) {
                 zip_fclose(input);
@@ -116,7 +122,7 @@ static bool extract_vpk(const char *vpk_path, const char *destination) {
             }
             if (read_count == 0) break;
             while (offset < (size_t)read_count) {
-                int write_count = sceIoWrite(output_fd, block + offset, (size_t)read_count - offset);
+                int write_count = sceIoWrite(output_fd, extract_block + offset, (size_t)read_count - offset);
                 if (write_count <= 0) {
                     zip_fclose(input);
                     sceIoClose(output_fd);
@@ -157,8 +163,9 @@ bool vp_vita_fetch(const char *url, const char *bearer_token,
     ResponseBuffer buffer;
     char authorization[VP_TEXT + 32];
     CURLcode result;
+    long status = 0;
     (void)context;
-    if (url == NULL || response == NULL || response_capacity == 0) return false;
+    if (url == NULL || response == NULL || response_capacity == 0 || !valid_bearer_token(bearer_token)) return false;
     response[0] = '\0';
     buffer.buffer = response;
     buffer.capacity = response_capacity;
@@ -168,49 +175,79 @@ bool vp_vita_fetch(const char *url, const char *bearer_token,
     if (bearer_token != NULL && bearer_token[0] != '\0') {
         (void)snprintf(authorization, sizeof(authorization), "Authorization: Bearer %s", bearer_token);
         headers = curl_slist_append(headers, authorization);
+        if (headers == NULL) {
+            curl_easy_cleanup(curl);
+            return false;
+        }
     }
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, response_write);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION,
+                     bearer_token != NULL && bearer_token[0] != '\0' ? 0L : 1L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     result = curl_easy_perform(curl);
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    return result == CURLE_OK && buffer.used > 0;
+    return result == CURLE_OK && status >= 200 && status < 300 && buffer.used > 0;
 }
 
-bool vp_vita_transfer(const char *url, const char *destination,
+bool vp_vita_transfer(const char *url, const char *bearer_token, const char *destination,
                       VpTransferAction action, void *context) {
     CURL *curl;
+    struct curl_slist *headers = NULL;
     DownloadFile file;
     CURLcode result;
+    long status = 0;
     bool installed = true;
+    bool downloaded;
+    char authorization[VP_TEXT + 32];
     (void)context;
-    if (url == NULL || destination == NULL || !make_parent_dirs(destination)) return false;
+    if (url == NULL || destination == NULL || !valid_bearer_token(bearer_token) ||
+        !make_parent_dirs(destination)) return false;
     file.fd = sceIoOpen(destination, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
     if (file.fd < 0) return false;
     curl = curl_easy_init();
     if (curl == NULL) {
         sceIoClose(file.fd);
+        (void)sceIoRemove(destination);
         return false;
     }
+    if (bearer_token != NULL && bearer_token[0] != '\0') {
+        (void)snprintf(authorization, sizeof(authorization), "Authorization: Bearer %s", bearer_token);
+        headers = curl_slist_append(headers, authorization);
+        if (headers == NULL) {
+            curl_easy_cleanup(curl);
+            sceIoClose(file.fd);
+            (void)sceIoRemove(destination);
+            return false;
+        }
+    }
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, file_write);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &file);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION,
+                     bearer_token != NULL && bearer_token[0] != '\0' ? 0L : 1L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     result = curl_easy_perform(curl);
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     sceIoClose(file.fd);
-    if (result != CURLE_OK) return false;
+    downloaded = result == CURLE_OK && status >= 200 && status < 300;
+    if (!downloaded) {
+        (void)sceIoRemove(destination);
+        return false;
+    }
     if (action == VP_TRANSFER_INSTALL_VPK) installed = promote_vpk(destination);
     return installed;
 }

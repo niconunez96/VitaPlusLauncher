@@ -9,13 +9,13 @@ Un provider obtiene datos remotos y los normaliza a `VpItem`. El núcleo nunca e
 `vp_romm_sync()` solicita:
 
 ```text
-GET {romm_url}/api/roms?limit=250&offset=0
-Authorization: Bearer {client token}
+GET {romm_url}/api/roms?limit=1&offset=<n>
+Authorization: Bearer <token>
 ```
 
 La respuesta debe incluir un `id` y `name`/`title`. Si están presentes, VitaPlus conserva `platform_slug`, `url_cover` y `download_url`; URLs relativas se convierten a absolutas contra `romm_url`.
 
-La UI debe pedir confirmación antes de descargar y seleccionar una ruta de destino configurada por plataforma. El token debe tener sólo permisos de lectura/descarga requeridos por el cliente.
+La UI debe pedir confirmación antes de descargar y seleccionar una ruta de destino configurada por plataforma. El token debe tener sólo permisos de lectura/descarga requeridos por el cliente. VitaPlus lo envía como `Authorization: Bearer` para páginas de catálogo y recursos RomM del mismo origen; nunca lo adjunta a URLs externas de artwork o descargas. El catálogo se pagina de a un ítem para respetar el buffer fijo del core y se detiene al llegar a `total` o `VP_MAX_ITEMS`. Respuestas HTTP fuera de `2xx` hacen fallar el backend.
 
 ## Homebrew
 
