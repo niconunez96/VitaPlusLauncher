@@ -64,7 +64,8 @@ typedef enum {
     VP_JOB_PAIR_AND_SYNC,
     VP_JOB_DOWNLOAD_ROM,
     VP_JOB_INSTALL_HOMEBREW,
-    VP_JOB_FETCH_COVER
+    VP_JOB_FETCH_COVER,
+    VP_JOB_SYNC_COVERS
 } VpJobKind;
 
 typedef struct {
@@ -84,6 +85,8 @@ typedef struct {
     char error[VP_TEXT];
     unsigned long long downloaded;
     unsigned long long total;
+    size_t covers_completed;
+    size_t covers_total;
     bool cancel_requested;
 } VpBackgroundJob;
 
@@ -104,6 +107,7 @@ static bool catalog_view_cache_dirty = true;
 static char unavailable_cover_ids[VP_COVER_SLOTS][VP_TEXT];
 
 static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context);
+static void cover_path_for(const char *id, char *path, size_t capacity);
 
 static bool save_catalog_cache(const VpCatalog *catalog, const VpRommConfig *config) {
     static const char magic[] = "VPCAT01";
@@ -301,6 +305,7 @@ static void *background_job_run(void *context) {
     VpJobKind kind;
     VpRommConfig config;
     VpHomebrewConfig homebrew;
+    VpCatalog catalog;
     VpItem item;
     char pair_code[VP_TEXT];
     char destination[VP_PATH];
@@ -314,6 +319,7 @@ static void *background_job_run(void *context) {
     kind = job->kind;
     config = job->romm;
     homebrew = job->homebrew;
+    catalog = job->catalog;
     item = job->item;
     (void)snprintf(destination, sizeof(destination), "%s", job->destination);
     (void)snprintf(partial, sizeof(partial), "%s", job->partial);
@@ -339,10 +345,36 @@ static void *background_job_run(void *context) {
         }
         if (!romm_requested && !homebrew_requested) succeeded = false;
         if (succeeded) (void)save_catalog_cache(&job->catalog, &config);
+    } else if (kind == VP_JOB_SYNC_COVERS) {
+        VpCoverTransformBackend cover_backend = {vp_vita_transform_cover, NULL};
+        size_t index;
+        succeeded = true;
+        for (index = 0; index < catalog.count; index++) {
+            const VpItem *cover = &catalog.items[index];
+            char destination[VP_PATH];
+            char partial[VP_PATH + 8];
+            bool transformed;
+            if (cover->source != VP_SOURCE_ROMM || cover->cover_url[0] == '\0') continue;
+            cover_path_for(cover->id, destination, sizeof(destination));
+            if (snprintf(partial, sizeof(partial), "%s.tmp", destination) >= (int)sizeof(partial)) {
+                succeeded = false;
+                break;
+            }
+            transformed = vp_cache_cover(cover, &config, partial, cover_backend);
+            if (transformed) {
+                (void)sceIoRemove(destination);
+                transformed = sceIoRename(partial, destination) >= 0;
+                if (!transformed) (void)sceIoRemove(partial);
+            }
+            if (!transformed) succeeded = false;
+            pthread_mutex_lock(&job->mutex);
+            job->covers_completed++;
+            pthread_mutex_unlock(&job->mutex);
+        }
     } else {
         VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
         VpCoverTransformBackend cover_backend = {vp_vita_transform_cover, NULL};
-        const char *target = kind == VP_JOB_DOWNLOAD_ROM ? partial : destination;
+        const char *target = kind == VP_JOB_DOWNLOAD_ROM || kind == VP_JOB_FETCH_COVER ? partial : destination;
         if (kind == VP_JOB_INSTALL_HOMEBREW)
             succeeded = vp_install_homebrew(&item, target, transfer_backend);
         else if (kind == VP_JOB_FETCH_COVER)
@@ -351,7 +383,8 @@ static void *background_job_run(void *context) {
             succeeded = vp_vita_transfer_with_progress(item.download_url, config.token, target,
                                                        VP_TRANSFER_DOWNLOAD, download_progress,
                                                        job, NULL);
-        if (succeeded && kind == VP_JOB_DOWNLOAD_ROM) {
+        if (succeeded && (kind == VP_JOB_DOWNLOAD_ROM || kind == VP_JOB_FETCH_COVER)) {
+            if (kind == VP_JOB_FETCH_COVER) (void)sceIoRemove(destination);
             succeeded = sceIoRename(partial, destination) >= 0;
             if (!succeeded) (void)sceIoRemove(partial);
         }
@@ -384,6 +417,8 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
     background_job.error[0] = '\0';
     background_job.downloaded = 0;
     background_job.total = 0;
+    background_job.covers_completed = 0;
+    background_job.covers_total = 0;
     background_job.cancel_requested = false;
     background_job.romm = romm_config;
     background_job.homebrew = homebrew_config;
@@ -436,6 +471,8 @@ static void background_job_poll(VpApp *app) {
     char error[VP_TEXT];
     bool succeeded;
     bool canceled;
+    size_t covers_completed;
+    size_t covers_total;
 
     pthread_mutex_lock(&background_job.mutex);
     if (!background_job.active || !background_job.completed) {
@@ -449,6 +486,8 @@ static void background_job_poll(VpApp *app) {
     (void)snprintf(destination, sizeof(destination), "%s", background_job.destination);
     (void)snprintf(error, sizeof(error), "%s", background_job.error);
     canceled = background_job.cancel_requested;
+    covers_completed = background_job.covers_completed;
+    covers_total = background_job.covers_total;
     pthread_mutex_unlock(&background_job.mutex);
 
     (void)pthread_join(background_job.thread, NULL);
@@ -480,6 +519,9 @@ static void background_job_poll(VpApp *app) {
         apply_provider_catalog(app, &background_job.catalog);
         (void)snprintf(app->notice, sizeof(app->notice), "Biblioteca sincronizada: %u juegos",
                        (unsigned)app->catalog.count);
+    } else if (kind == VP_JOB_SYNC_COVERS) {
+        (void)snprintf(app->notice, sizeof(app->notice), "Metadata sincronizada: %u/%u caratulas",
+                       (unsigned)covers_completed, (unsigned)covers_total);
     } else if (kind == VP_JOB_DOWNLOAD_ROM) {
         VpDownloadEntry *entry = vp_download_queue_find(&download_queue, item.id);
         if (entry != NULL) {
@@ -521,6 +563,43 @@ static bool sync_romm_catalog(VpApp *app) {
     if ((romm_config.base_url[0] == '\0' || romm_config.token[0] == '\0') &&
         homebrew_config.catalog_url[0] == '\0') return false;
     return background_job_start(VP_JOB_SYNC_PROVIDERS, NULL, NULL, NULL);
+}
+
+static bool sync_cover_metadata(VpApp *app) {
+    size_t index;
+    int result;
+    if (app == NULL || romm_config.base_url[0] == '\0' || romm_config.token[0] == '\0') return false;
+    pthread_mutex_lock(&background_job.mutex);
+    if (background_job.active) {
+        pthread_mutex_unlock(&background_job.mutex);
+        return false;
+    }
+    background_job.kind = VP_JOB_SYNC_COVERS;
+    background_job.completed = false;
+    background_job.succeeded = false;
+    background_job.error[0] = '\0';
+    background_job.downloaded = 0;
+    background_job.total = 0;
+    background_job.covers_completed = 0;
+    background_job.covers_total = 0;
+    background_job.cancel_requested = false;
+    background_job.romm = romm_config;
+    background_job.homebrew = homebrew_config;
+    background_job.catalog = app->catalog;
+    for (index = 0; index < background_job.catalog.count; index++) {
+        const VpItem *item = &background_job.catalog.items[index];
+        if (item->source == VP_SOURCE_ROMM && item->cover_url[0] != '\0')
+            background_job.covers_total++;
+    }
+    if (background_job.covers_total == 0) {
+        pthread_mutex_unlock(&background_job.mutex);
+        return false;
+    }
+    background_job.active = true;
+    result = pthread_create(&background_job.thread, NULL, background_job_run, &background_job);
+    if (result != 0) background_job.active = false;
+    pthread_mutex_unlock(&background_job.mutex);
+    return result == 0;
 }
 
 static void settings_text_to_wide(const char *source, SceWChar16 *destination, size_t capacity) {
@@ -614,14 +693,19 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         return;
     }
     if (settings_section != 0) return;
-    if (pressed & SCE_CTRL_UP) settings_field = (settings_field + 2) % 3;
-    if (pressed & SCE_CTRL_DOWN) settings_field = (settings_field + 1) % 3;
+    if (pressed & SCE_CTRL_UP) settings_field = (settings_field + 3) % 4;
+    if (pressed & SCE_CTRL_DOWN) settings_field = (settings_field + 1) % 4;
     if (pressed & SCE_CTRL_CROSS) {
         if (settings_field == 2) {
             if (sync_romm_catalog(app))
                 (void)snprintf(app->notice, sizeof(app->notice), "Sincronizacion iniciada en segundo plano");
             else
                 (void)snprintf(app->notice, sizeof(app->notice), "No se pudo iniciar la sincronizacion");
+        } else if (settings_field == 3) {
+            if (sync_cover_metadata(app))
+                (void)snprintf(app->notice, sizeof(app->notice), "Metadata sincronizandose en segundo plano");
+            else
+                (void)snprintf(app->notice, sizeof(app->notice), "No se pudo iniciar metadata; revisa RomM");
         } else if (!settings_start_ime()) {
             (void)snprintf(app->notice, sizeof(app->notice), "No se pudo abrir el teclado de PS Vita");
         }
@@ -764,6 +848,7 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
         VpCoverSlot *slot;
         VpItem source_item;
         char path[VP_PATH];
+        char partial[VP_PATH + 8];
         FILE *file;
         if (item->cover_url[0] == '\0') continue;
         if (cover_is_unavailable(item->id)) continue;
@@ -780,7 +865,8 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
             slot->attempted = true;
             return;
         }
-        if (!background_job_start(VP_JOB_FETCH_COVER, &source_item, path, NULL)) {
+        if (snprintf(partial, sizeof(partial), "%s.tmp", path) >= (int)sizeof(partial) ||
+            !background_job_start(VP_JOB_FETCH_COVER, &source_item, path, partial)) {
             continue;
         }
         return;
@@ -1182,6 +1268,7 @@ static void draw_shell(vita2d_font *font, VpApp *app) {
             const char *url_prefix = settings_field == 0 ? "> " : "  ";
             const char *pair_prefix = settings_field == 1 ? "> " : "  ";
             const char *sync_prefix = settings_field == 2 ? "> " : "  ";
+            const char *metadata_prefix = settings_field == 3 ? "> " : "  ";
             vita2d_pgf_draw_text(font, 42, 175, text, 0.82f, "RomM");
             vita2d_pgf_draw_textf(font, 42, 218, settings_field == 0 ? accent : text, 0.68f,
                                   "%sURL: %s", url_prefix,
@@ -1191,11 +1278,13 @@ static void draw_shell(vita2d_font *font, VpApp *app) {
                                   romm_pair_code[0] != '\0' ? romm_pair_code : "(ingresa el codigo de 8 caracteres)");
             vita2d_pgf_draw_textf(font, 42, 298, settings_field == 2 ? accent : text, 0.68f,
                                   "%sSincronizar ahora", sync_prefix);
-            vita2d_pgf_draw_text(font, 42, 342, muted, 0.58f,
-                                 "Arriba/Abajo campo | X edita o sincroniza | Triangulo canjea y guarda");
-            vita2d_pgf_draw_text(font, 42, 370, muted, 0.58f,
-                                 "Circulo vuelve a Ajustes; el codigo se canjea una vez y no se guarda");
-            if (app->notice[0] != '\0') vita2d_pgf_draw_text(font, 42, 410, RGBA(245, 174, 79, 255), 0.62f, app->notice);
+            vita2d_pgf_draw_textf(font, 42, 338, settings_field == 3 ? accent : text, 0.68f,
+                                  "%sSincronizar metadata", metadata_prefix);
+            vita2d_pgf_draw_text(font, 42, 382, muted, 0.58f,
+                                  "Arriba/Abajo campo | X edita o sincroniza | Triangulo canjea y guarda");
+            vita2d_pgf_draw_text(font, 42, 410, muted, 0.58f,
+                                  "Circulo vuelve a Ajustes; el codigo se canjea una vez y no se guarda");
+            if (app->notice[0] != '\0') vita2d_pgf_draw_text(font, 42, 448, RGBA(245, 174, 79, 255), 0.62f, app->notice);
         }
         return;
     }

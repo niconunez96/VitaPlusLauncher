@@ -77,7 +77,7 @@ Si una instalación anterior tiene artwork problemático, borrá `ux0:data/vitap
 
 En **Ajustes**, configurá la `URL` y presioná `X` en `Pair code` para introducir el código corto que genera **Pair Device** en RomM. `Triángulo` canjea el código una sola vez, guarda internamente el token recibido y sincroniza el catálogo. El código no se persiste ni se vuelve a mostrar; el token nunca se muestra en pantalla.
 
-Después de una sincronización correcta, VitaPlus guarda una caché local del catálogo y la muestra al abrir la app, sin esperar a la red. En **Ajustes → RomM**, seleccioná **Sincronizar ahora** y presioná `X` cuando quieras actualizarla manualmente.
+Después de una sincronización correcta, VitaPlus guarda una caché local del catálogo y la muestra al abrir la app, sin esperar a la red. En **Ajustes → RomM**, seleccioná **Sincronizar ahora** y presioná `X` cuando quieras actualizarla manualmente. **Sincronizar metadata** recorre las carátulas de RomM en segundo plano, las transforma con el servicio de imágenes y las guarda en la caché.
 
 Usá la URL base de tu servidor (por ejemplo, `http://192.168.1.100:8080`) y creá en RomM un Client API Token de permisos mínimos de lectura/descarga antes de generar el pair code. Nunca compartas `config.ini`: contiene el token recibido.
 
