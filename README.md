@@ -59,7 +59,10 @@ La interfaz usa la fuente **PGF del sistema**, en la pantalla nativa de 960×544
 
 Aurora mantiene la estructura núcleo/proveedores/frontend y los controles existentes:
 flechas para navegar, `X` para abrir/descargar/jugar, círculo para volver, `L/R` para
-cambiar de sección, triángulo para cambiar de vista y cuadrado para favoritos.
+cambiar de sección, triángulo para cambiar de vista y cuadrado para favoritos. La pantalla
+táctil frontal permite tocar las tarjetas, filas, dock, selector de vista y el área de volver:
+el primer toque selecciona y el segundo confirma acciones potencialmente costosas (descargar,
+jugar o instalar).
 En Ajustes, triángulo conserva la acción de canjear y guardar el código de RomM.
 
 - Biblioteca con iconos de controles por consola, colores propios y foco animado.

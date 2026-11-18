@@ -29,7 +29,7 @@ if(DEFINED ENV{VITASDK})
   # Catch large automatic buffers before they can exhaust a Vita thread stack.
   target_compile_options(vitaplus PRIVATE -Werror=frame-larger-than=16384)
   target_link_libraries(vitaplus vitaplus_core vita2d png jpeg curl zip z zstd bz2 lzma ssl crypto m pthread
-    SceCtrl_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub SceCommonDialog_stub SceIme_stub
+    SceCtrl_stub SceTouch_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub SceCommonDialog_stub SceIme_stub
     ScePgf_stub SceIofilemgr_stub SceNet_stub SceNetCtl_stub SceSsl_stub SceSysmodule_stub SceAudio_stub
     ScePromoterUtil_stub_weak)
   configure_file("$ENV{VITASDK}/arm-vita-eabi/ssl/openssl.cnf"
