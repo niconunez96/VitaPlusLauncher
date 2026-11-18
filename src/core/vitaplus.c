@@ -567,15 +567,6 @@ const char *vp_source_name(VpSource source) {
     }
 }
 
-const char *vp_view_name(VpView view) {
-    switch (view) {
-        case VP_VIEW_GRID: return "grid";
-        case VP_VIEW_LIST: return "list";
-        case VP_VIEW_CAROUSEL: return "carousel";
-        default: return "grid";
-    }
-}
-
 void vp_app_init(VpApp *app) {
     if (app == NULL) return;
     memset(app, 0, sizeof(*app));

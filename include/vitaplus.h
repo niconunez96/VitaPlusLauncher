@@ -221,7 +221,6 @@ bool vp_download_queue_retry(VpDownloadQueue *queue, const char *item_id);
 
 bool vp_theme_load(VpTheme *theme, const char *ini_text);
 const char *vp_source_name(VpSource source);
-const char *vp_view_name(VpView view);
 
 void vp_launch_config_init(VpLaunchConfig *config);
 bool vp_launch_config_set(VpLaunchConfig *config, const char *platform, const char *value);

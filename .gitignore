@@ -1,4 +1,5 @@
 build/
+build-vita/
 dist/
 *.vpk
 *.elf

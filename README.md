@@ -54,7 +54,6 @@ cmake --build build/vita
 El VPK queda en `build/vita/vitaplus.vpk`.
 
 La interfaz usa la fuente **PGF del sistema**, en la pantalla nativa de 960×544.
-Los archivos Noto Sans conservados en `assets/fonts/` no se cargan ni se incluyen en el VPK.
 
 ## Interfaz Aurora
 
