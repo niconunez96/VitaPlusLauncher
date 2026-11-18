@@ -53,6 +53,38 @@ VpUiRect vp_ui_tile(size_t slot) {
     return r;
 }
 
+int vp_ui_touch_tile_slot(int x, int y) {
+    size_t slot;
+    for (slot = 0; slot < 8; slot++) {
+        VpUiRect r = vp_ui_tile(slot);
+        if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return (int)slot;
+    }
+    return -1;
+}
+
+int vp_ui_touch_list_slot(int x, int y) {
+    int slot;
+    if (x < 28 || x >= 932) return -1;
+    for (slot = 0; slot < 6; slot++) {
+        int row_y = 146 + slot * 43;
+        if (y >= row_y && y < row_y + 39) return slot;
+    }
+    return -1;
+}
+
+int vp_ui_touch_dock_screen(int x, int y) {
+    if (y < 480 || y >= 528 || x < 278 || x >= 746) return -1;
+    return (x - 278) / 156;
+}
+
+bool vp_ui_touch_view_toggle(int x, int y) {
+    return x >= 802 && x < 932 && y >= 76 && y < 112;
+}
+
+bool vp_ui_touch_back(int x, int y) {
+    return x >= 685 && x < 932 && y >= 421 && y < 472;
+}
+
 float vp_ui_ease(float p) {
     if (p < 0) return 0;
     if (p > 1) return 1;

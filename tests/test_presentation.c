@@ -30,7 +30,23 @@ int main(void) {
     for (i = 0; i < 8; ++i) {
         VpUiRect r = vp_ui_tile(i);
         assert(r.x >= 24 && r.y >= 140 && r.x + r.w <= 936 && r.y + r.h <= 414);
+        assert(vp_ui_touch_tile_slot(r.x, r.y) == (int)i);
+        assert(vp_ui_touch_tile_slot(r.x + r.w - 1, r.y + r.h - 1) == (int)i);
     }
+    assert(vp_ui_touch_tile_slot(27, 146) == -1);
+    assert(vp_ui_touch_tile_slot(242, 146) == -1);
+    assert(vp_ui_touch_list_slot(28, 146) == 0);
+    assert(vp_ui_touch_list_slot(931, 399) == 5);
+    assert(vp_ui_touch_list_slot(27, 146) == -1);
+    assert(vp_ui_touch_list_slot(28, 185) == -1);
+    assert(vp_ui_touch_dock_screen(278, 480) == 0);
+    assert(vp_ui_touch_dock_screen(434, 527) == 1);
+    assert(vp_ui_touch_dock_screen(745, 480) == 2);
+    assert(vp_ui_touch_dock_screen(746, 480) == -1);
+    assert(vp_ui_touch_view_toggle(802, 76));
+    assert(!vp_ui_touch_view_toggle(801, 76));
+    assert(vp_ui_touch_back(685, 421));
+    assert(!vp_ui_touch_back(684, 421));
     assert(vp_ui_ease(-1) == 0 && vp_ui_ease(1) == 1 && vp_ui_ease(2) == 1);
     assert(vp_ui_ease(.5f) > .5f);
     vp_ui_appearance_load(&appearance, "id=legacy\nbackground=#101624\n");

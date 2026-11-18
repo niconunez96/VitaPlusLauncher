@@ -4,6 +4,7 @@
 #include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/sysmodule.h>
+#include <psp2/touch.h>
 #include <vita2d.h>
 
 #include <curl/curl.h>
@@ -16,6 +17,7 @@
 #include "vita_backend.h"
 #include "vitaplus.h"
 #include "ui_audio.h"
+#include "ui_presentation.h"
 #include "ui_renderer.h"
 
 #define RGBA(r, g, b, a) ((unsigned int)((r) | ((g) << 8) | ((b) << 16) | ((a) << 24)))
@@ -23,6 +25,9 @@
 #define VP_CATALOG_CACHE_PATH "ux0:data/vitaplus/catalog.cache"
 #define VP_CATALOG_CACHE_PARTIAL "ux0:data/vitaplus/catalog.cache.part"
 #define VP_CATALOG_CACHE_VERSION 1U
+#define VP_TOUCH_WIDTH 1920
+#define VP_TOUCH_HEIGHT 1088
+#define VP_TOUCH_TAP_SLOP 32
 static VpRommConfig romm_config;
 static VpHomebrewConfig homebrew_config;
 static VpLaunchConfig launch_config;
@@ -1097,12 +1102,117 @@ static void prepare_shell(VpUiFrame *frame, vita2d_pgf *font, VpApp *app, unsign
     pthread_mutex_unlock(&background_job.mutex);
 }
 
+static unsigned int touch_navigation_pressed(int x, int y) {
+    int slot;
+    int screen = vp_ui_touch_dock_screen(x, y);
+    if (screen >= 0) {
+        if (app.active_screen != (VpScreen)screen) {
+            app.active_screen = (VpScreen)screen;
+            vp_ui_audio_play(VP_UI_SOUND_TAB);
+        }
+        return 0;
+    }
+    if (app.active_screen == VP_SCREEN_LIBRARY) {
+        refresh_catalog_view_cache(&app);
+        if (app.library_level == VP_LEVEL_PLATFORMS) {
+            size_t target;
+            slot = vp_ui_touch_tile_slot(x, y);
+            if (slot < 0) return 0;
+            target = (app.selected_platform / 8) * 8 + (size_t)slot;
+            if (target >= platform_group_count) return 0;
+            if (target != app.selected_platform) {
+                app.selected_platform = target;
+                vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+                return 0;
+            }
+            return SCE_CTRL_CROSS;
+        }
+        if (vp_ui_touch_back(x, y)) return SCE_CTRL_CIRCLE;
+        if (vp_ui_touch_view_toggle(x, y)) return SCE_CTRL_TRIANGLE;
+        if (app.active_view == VP_VIEW_CAROUSEL) {
+            if (x >= 116 && x < 306 && y >= 173 && y < 377) return SCE_CTRL_LEFT;
+            if (x >= 654 && x < 844 && y >= 173 && y < 377) return SCE_CTRL_RIGHT;
+            if (x >= 365 && x < 595 && y >= 142 && y < 406) return SCE_CTRL_CROSS;
+            return 0;
+        }
+        slot = app.active_view == VP_VIEW_GRID ? vp_ui_touch_tile_slot(x, y) : vp_ui_touch_list_slot(x, y);
+        if (slot >= 0) {
+            size_t page = app.active_view == VP_VIEW_GRID ? 8 : 6;
+            size_t position = visible_position(visible_indexes, visible_count_cache, app.selected_item);
+            size_t target = (position / page) * page + (size_t)slot;
+            if (target >= visible_count_cache) return 0;
+            if (visible_indexes[target] != app.selected_item) {
+                app.selected_item = visible_indexes[target];
+                vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+                return 0;
+            }
+            return SCE_CTRL_CROSS;
+        }
+        return 0;
+    }
+    if (app.active_screen != VP_SCREEN_SETTINGS) return 0;
+    if (settings_detail_active && vp_ui_touch_back(x, y)) return SCE_CTRL_CIRCLE;
+    if (!settings_detail_active) {
+        for (slot = 0; slot < 3; slot++) {
+            int row_y = 149 + slot * 84;
+            if (x >= 96 && x < 864 && y >= row_y && y < row_y + 72) {
+                settings_section = slot;
+                return SCE_CTRL_CROSS;
+            }
+        }
+        return 0;
+    }
+    if (settings_section == 0) {
+        for (slot = 0; slot < 4; slot++) {
+            int row_y = 145 + slot * 62;
+            if (x >= 64 && x < 896 && y >= row_y && y < row_y + 54) {
+                settings_field = slot;
+                return SCE_CTRL_CROSS;
+            }
+        }
+    } else if (settings_section == 2) {
+        for (slot = 0; slot < 4 && (size_t)slot < download_queue.count; slot++) {
+            int row_y = 145 + slot * 64;
+            if (x >= 64 && x < 896 && y >= row_y && y < row_y + 58) {
+                download_selection = (download_selection / 4) * 4 + (size_t)slot;
+                return SCE_CTRL_CROSS;
+            }
+        }
+    }
+    return 0;
+}
+
+static unsigned int touch_tap_pressed(SceTouchData *touch, bool *active,
+                                      int *start_x, int *start_y, int *last_x, int *last_y) {
+    if (touch->reportNum > 0) {
+        int x = (int)touch->report[0].x;
+        int y = (int)touch->report[0].y;
+        if (!*active) {
+            *start_x = x;
+            *start_y = y;
+            *active = true;
+        }
+        *last_x = x;
+        *last_y = y;
+        return 0;
+    }
+    if (!*active) return 0;
+    *active = false;
+    if (abs(*last_x - *start_x) > VP_TOUCH_TAP_SLOP || abs(*last_y - *start_y) > VP_TOUCH_TAP_SLOP)
+        return 0;
+    return touch_navigation_pressed(*last_x * 960 / VP_TOUCH_WIDTH,
+                                    *last_y * 544 / VP_TOUCH_HEIGHT);
+}
+
 int main(void) {
     SceCtrlData pad;
+    SceTouchData touch;
     unsigned int previous = 0;
     vita2d_pgf *font;
     bool curl_cleanup_allowed;
     bool rendered_once = false;
+    bool touch_active = false;
+    int touch_start_x = 0, touch_start_y = 0, touch_last_x = 0, touch_last_y = 0;
     vp_app_init(&app);
     vp_download_queue_init(&download_queue);
     vp_launch_config_init(&launch_config);
@@ -1126,6 +1236,7 @@ int main(void) {
     (void)vp_ui_audio_init();
     (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
+    (void)sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
     for (;;) {
         unsigned int pressed;
         VpUiFrame frame;
@@ -1141,6 +1252,10 @@ int main(void) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
         pressed = pad.buttons & ~previous;
         previous = pad.buttons;
+        memset(&touch, 0, sizeof(touch));
+        if (sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1) >= 0)
+            pressed |= touch_tap_pressed(&touch, &touch_active, &touch_start_x, &touch_start_y,
+                                         &touch_last_x, &touch_last_y);
         if (pressed & SCE_CTRL_START) break;
         if (app.active_screen == VP_SCREEN_SETTINGS) {
             handle_settings_input(&app, pressed);
