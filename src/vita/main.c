@@ -11,6 +11,7 @@
 #include <curl/curl.h>
 
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +54,7 @@ static size_t download_selection;
 static bool settings_detail_active;
 static bool settings_ime_active;
 static SceWChar16 settings_ime_buffer[VP_URL];
+static unsigned long long installation_armed_at;
 
 typedef enum {
     VP_JOB_NONE,
@@ -107,6 +109,15 @@ static bool catalog_view_cache_dirty = true;
 
 static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context);
 static void cover_path_for(const char *id, char *path, size_t capacity);
+
+static void show_notification(VpApp *app, const char *format, ...) {
+    va_list arguments;
+    if (app == NULL) return;
+    va_start(arguments, format);
+    (void)vsnprintf(app->notice, sizeof(app->notice), format, arguments);
+    va_end(arguments);
+    app->notice_id++;
+}
 
 static void request_romm_check(void) {
     if (romm_config.base_url[0] == '\0' || romm_config.token[0] == '\0') {
@@ -509,8 +520,7 @@ static bool pause_active_download(VpApp *app, bool exiting) {
         }
     }
     if (!active) return false;
-    (void)snprintf(app->notice, sizeof(app->notice), "%s",
-                   exiting ? "Descarga pausada al salir" : "Descarga pausada; X para reanudar");
+    if (!exiting) show_notification(app, "Descarga pausada; X para reanudar");
     return true;
 }
 
@@ -566,7 +576,7 @@ static void background_job_poll(VpApp *app) {
             romm_config = config;
             memset(romm_pair_code, 0, sizeof(romm_pair_code));
             if (!save_romm_config()) {
-                (void)snprintf(app->notice, sizeof(app->notice), "Token recibido, pero no se pudo guardar la configuracion");
+                show_notification(app, "Token recibido, pero no se pudo guardar la configuracion");
                 (void)start_next_download();
                 return;
             }
@@ -578,17 +588,16 @@ static void background_job_poll(VpApp *app) {
     }
 
     if (!succeeded && kind != VP_JOB_DOWNLOAD_ROM) {
-        (void)snprintf(app->notice, sizeof(app->notice), "Operacion fallida: %.140s", error);
+        show_notification(app, "Operacion fallida: %.140s", error);
         (void)start_next_download();
         return;
     }
     if (kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC) {
         apply_provider_catalog(app, &background_job.catalog);
-        (void)snprintf(app->notice, sizeof(app->notice), "Biblioteca sincronizada: %u juegos",
-                       (unsigned)app->catalog.count);
+        show_notification(app, "Biblioteca sincronizada: %u juegos", (unsigned)app->catalog.count);
     } else if (kind == VP_JOB_SYNC_COVERS) {
-        (void)snprintf(app->notice, sizeof(app->notice), "Metadata sincronizada: %u/%u caratulas",
-                       (unsigned)covers_completed, (unsigned)covers_total);
+        show_notification(app, "Metadata sincronizada: %u/%u caratulas",
+                          (unsigned)covers_completed, (unsigned)covers_total);
     } else if (kind == VP_JOB_DOWNLOAD_ROM) {
         VpDownloadEntry *entry = vp_download_queue_find(&download_queue, item.id);
         if (entry != NULL) {
@@ -603,16 +612,17 @@ static void background_job_poll(VpApp *app) {
             }
         }
         if (paused && !succeeded) {
-            (void)snprintf(app->notice, sizeof(app->notice), "Descarga pausada; X para reanudar");
+            show_notification(app, "Descarga pausada; X para reanudar");
             return;
         }
         if (!succeeded && canceled) {
             if (entry != NULL)
-                (void)snprintf(app->notice, sizeof(app->notice), "Descarga cancelada");
+                show_notification(app, "Descarga cancelada");
             (void)start_next_download();
             return;
         }
         if (!succeeded) {
+            show_notification(app, "Fallo la descarga: %.120s", item.title);
             (void)start_next_download();
             return;
         }
@@ -622,13 +632,13 @@ static void background_job_poll(VpApp *app) {
             (void)snprintf(completed->launch_target, sizeof(completed->launch_target), "%s",
                            destination);
         }
-        (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada; presiona X para jugar");
+        show_notification(app, "Descarga finalizada: %.120s", item.title);
         vp_ui_audio_play(VP_UI_SOUND_DOWNLOAD_COMPLETE);
         (void)start_next_download();
     } else if (kind == VP_JOB_INSTALL_HOMEBREW) {
         VpItem *completed = vp_catalog_find(&app->catalog, item.id);
         if (completed != NULL) completed->installed = true;
-        (void)snprintf(app->notice, sizeof(app->notice), "Instalacion finalizada; revisa LiveArea");
+        show_notification(app, "Instalacion finalizada; revisa LiveArea");
     }
     if (kind != VP_JOB_DOWNLOAD_ROM) (void)start_next_download();
 }
@@ -778,8 +788,8 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
                 bool resumed = entry->state == VP_DOWNLOAD_PAUSED;
                 (void)vp_download_queue_retry(&download_queue, entry->item.id);
                 (void)start_next_download();
-                (void)snprintf(app->notice, sizeof(app->notice), "%s %.110s",
-                               resumed ? "Reanudando" : "Reintentando", entry->item.title);
+                show_notification(app, "%s descarga: %.110s",
+                                  resumed ? "Reanudando" : "Reintentando", entry->item.title);
             } else if (entry->state == VP_DOWNLOAD_PENDING || entry->state == VP_DOWNLOAD_DOWNLOADING) {
                 bool active = false;
                 (void)vp_download_queue_cancel(&download_queue, entry->item.id);
@@ -791,7 +801,7 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
                     background_job.pause_requested = false;
                 }
                 pthread_mutex_unlock(&background_job.mutex);
-                (void)snprintf(app->notice, sizeof(app->notice), active ? "Cancelando descarga" : "Descarga cancelada");
+                show_notification(app, active ? "Cancelando descarga" : "Descarga cancelada");
                 if (!active) (void)start_next_download();
             }
         }
@@ -810,7 +820,7 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
             (void)vp_download_queue_remove(&download_queue, item_id);
             if (download_selection >= download_queue.count && download_queue.count > 0)
                 download_selection = download_queue.count - 1;
-            (void)snprintf(app->notice, sizeof(app->notice), "Descarga eliminada de la cola");
+            show_notification(app, "Descarga eliminada de la cola");
             vp_ui_audio_play(VP_UI_SOUND_BACK);
             if (!active) (void)start_next_download();
         }
@@ -828,35 +838,32 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
     if (pressed & SCE_CTRL_CROSS) {
         if (settings_field == 2) {
             if (sync_romm_catalog(app))
-                (void)snprintf(app->notice, sizeof(app->notice), "Sincronizacion iniciada en segundo plano");
+                show_notification(app, "Sincronizacion de catalogo iniciada");
             else
-                (void)snprintf(app->notice, sizeof(app->notice), "No se pudo iniciar la sincronizacion");
+                show_notification(app, "No se pudo iniciar la sincronizacion");
         } else if (settings_field == 3) {
             if (sync_cover_metadata(app))
-                (void)snprintf(app->notice, sizeof(app->notice), "Metadata sincronizandose en segundo plano");
+                show_notification(app, "Sincronizacion de metadata iniciada");
             else
-                (void)snprintf(app->notice, sizeof(app->notice), "No se pudo iniciar metadata; revisa RomM");
+                show_notification(app, "No se pudo iniciar metadata; revisa RomM");
         } else if (settings_field == 1 && !vp_romm_pair_code_enabled(romm_connection.state)) {
-            (void)snprintf(app->notice, sizeof(app->notice), "%s",
-                           romm_connection.state == VP_ROMM_CONNECTED
-                               ? "RomM ya esta conectado; no necesitas otro pair code"
-                               : "Espera a que termine la comprobacion de RomM");
+
         } else if (!settings_start_ime()) {
-            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo abrir el teclado de PS Vita");
+            show_notification(app, "No se pudo abrir el teclado de PS Vita");
         }
     }
     if (pressed & SCE_CTRL_TRIANGLE) {
         if (romm_pair_code[0] != '\0' && vp_romm_pair_code_enabled(romm_connection.state)) {
             if (background_job_start(VP_JOB_PAIR_AND_SYNC, NULL, NULL, NULL))
-                (void)snprintf(app->notice, sizeof(app->notice), "Canjeando y sincronizando en segundo plano");
+                show_notification(app, "Canjeando codigo y sincronizando catalogo");
             else
-                (void)snprintf(app->notice, sizeof(app->notice), "Hay una operacion en curso; espera a que termine");
+                show_notification(app, "Hay una operacion en curso; espera a que termine");
         } else if (!save_romm_config()) {
-            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo guardar la configuracion");
+            show_notification(app, "No se pudo guardar la configuracion");
         } else if (sync_romm_catalog(app)) {
-            (void)snprintf(app->notice, sizeof(app->notice), "Sincronizacion iniciada en segundo plano");
+            show_notification(app, "Sincronizacion de catalogo iniciada");
         } else {
-            (void)snprintf(app->notice, sizeof(app->notice), "No se pudo iniciar la sincronizacion");
+            show_notification(app, "No se pudo iniciar la sincronizacion");
         }
     }
 }
@@ -1188,15 +1195,17 @@ static void activate_selected(VpApp *app) {
         safe_id(item->id, destination, sizeof(destination));
         if (!app->installation_armed) {
             app->installation_armed = true;
-            (void)snprintf(app->notice, sizeof(app->notice), "Presiona X otra vez para instalar %.150s", item->title);
+            installation_armed_at = sceKernelGetProcessTimeWide();
+            show_notification(app, "Presiona X otra vez para instalar %.150s", item->title);
             return;
         }
         (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/downloads/%s.vpk", destination);
         if (background_job_start(VP_JOB_INSTALL_HOMEBREW, item, path, NULL))
-            (void)snprintf(app->notice, sizeof(app->notice), "Instalando %.110s en segundo plano", item->title);
+            show_notification(app, "Instalacion iniciada: %.110s", item->title);
         else
-            (void)snprintf(app->notice, sizeof(app->notice), "Hay una operacion en curso; espera a que termine");
+            show_notification(app, "Hay una operacion en curso; espera a que termine");
         app->installation_armed = false;
+        installation_armed_at = 0;
         return;
     }
     if (item->installed && item->launch_target[0] != '\0') {
@@ -1244,7 +1253,7 @@ static void activate_selected(VpApp *app) {
             return;
         }
         (void)start_next_download();
-        (void)snprintf(app->notice, sizeof(app->notice), "%.110s agregada a Descargas", item->title);
+        show_notification(app, "Descarga iniciada: %.110s", item->title);
         vp_ui_audio_play(VP_UI_SOUND_DOWNLOAD_START);
         return;
     }
@@ -1271,7 +1280,7 @@ static void refresh_download_queue_progress(void) {
 
 /* Called only after the previous GPU frame completes, and before starting a scene.
  * Cache preparation may retire textures that the previous frame referenced. */
-static void prepare_shell(VpUiFrame *frame, vita2d_pgf *font, VpApp *app, unsigned int pressed) {
+static void prepare_shell(VpUiFrame *frame, vita2d_pgf *font, VpApp *app) {
     size_t group_count = 0;
     size_t visible_count = 0;
     size_t cover_count = 0;
@@ -1355,7 +1364,7 @@ static void prepare_shell(VpUiFrame *frame, vita2d_pgf *font, VpApp *app, unsign
     frame->romm_url = romm_config.base_url; frame->pair_code = romm_pair_code;
     frame->romm_state = romm_connection.state;
     frame->active_theme = active_theme;
-    frame->refresh_notice = (pressed & (SCE_CTRL_CROSS | SCE_CTRL_TRIANGLE)) != 0;
+    frame->notice_id = app->notice_id;
     pthread_mutex_lock(&background_job.mutex);
     frame->busy = background_job.active;
     pthread_mutex_unlock(&background_job.mutex);
@@ -1517,8 +1526,7 @@ int main(void) {
     (void)sceIoMkdir("ux0:data/vitaplus/downloads", 0777);
     load_providers(&app);
     request_romm_check();
-    if (load_catalog_cache(&app, &romm_config))
-        (void)snprintf(app.notice, sizeof(app.notice), "Biblioteca cargada desde cache");
+    (void)load_catalog_cache(&app, &romm_config);
     refresh_downloaded_items(&app);
     (void)sceSysmoduleLoadModule(SCE_SYSMODULE_PGF);
     vita2d_init();
@@ -1555,6 +1563,11 @@ int main(void) {
         if (pressed & SCE_CTRL_START) {
             (void)pause_active_download(&app, true);
             break;
+        }
+        if (app.installation_armed &&
+            sceKernelGetProcessTimeWide() - installation_armed_at >= 4000000ULL) {
+            app.installation_armed = false;
+            installation_armed_at = 0;
         }
         if (app.active_screen == VP_SCREEN_SETTINGS) {
             handle_settings_input(&app, pressed);
@@ -1629,7 +1642,7 @@ int main(void) {
          * the first frame: no rendering is in flight yet, and calling it there
          * crashes Vita3K before the first draw. */
         if (rendered_once) vita2d_wait_rendering_done();
-        prepare_shell(&frame, font, &app, pressed);
+        prepare_shell(&frame, font, &app);
         vita2d_start_drawing();
         vita2d_clear_screen();
         vp_ui_render(&frame);

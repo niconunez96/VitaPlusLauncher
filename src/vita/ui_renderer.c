@@ -39,6 +39,7 @@ static unsigned long long last_frame;
 static unsigned long long focus_at;
 static char focus_key[VP_TEXT + 64];
 static char last_notice[VP_TEXT];
+static unsigned int last_notice_id;
 static unsigned long long notice_at;
 static VpUiAppearance appearance={180,16,130};
 
@@ -462,18 +463,18 @@ void vp_ui_render(const VpUiFrame *f) {
         label(f->font,204,379,552,.52f,accent,"Tu biblioteca y RomM siguen disponibles con L / R.");
     }
     footer(f,dt);
-    if (strcmp(last_notice,f->app->notice) || f->refresh_notice) {
-        (void)snprintf(last_notice,sizeof(last_notice),"%s",f->app->notice); notice_at=now;
+    if (f->notice_id != last_notice_id) {
+        last_notice_id=f->notice_id;
+        (void)snprintf(last_notice,sizeof(last_notice),"%s",f->app->notice);
+        notice_at=now;
     }
     if (last_notice[0]) {
         float age=(float)(now-notice_at)/1000000;
-        /* Installation confirmation remains visible until explicitly resolved. */
-        if (age<6 || f->app->installation_armed) {
-            unsigned int a=(unsigned int)(255*fmaxf(0,fminf(1,(6-age)*2)));
-            if (f->app->installation_armed) a=255;
-            round_rect(106,414,748,58,15,alpha(mix(surface,bg,.6f),a));
-            icon(f->app->installation_armed?"ui_key":"ui_sync",118,427,28);
-            two_line_label(f->font,156,437,677,alpha(ink,a),last_notice);
+        if (age < 4) {
+            unsigned int a=(unsigned int)(255*fmaxf(0,fminf(1,(4-age)*2)));
+            round_rect(636,64,296,54,14,alpha(mix(surface,bg,.42f),a));
+            icon("ui_sync",646,76,26);
+            two_line_label(f->font,680,86,240,alpha(ink,a),last_notice);
         }
     }
 }

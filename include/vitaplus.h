@@ -127,6 +127,7 @@ typedef struct {
     size_t selected_item;
     bool installation_armed;
     char notice[VP_TEXT];
+    unsigned int notice_id;
 } VpApp;
 
 typedef bool (*VpFetchFn)(const char *url, const char *bearer_token,

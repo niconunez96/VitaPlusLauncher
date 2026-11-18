@@ -20,7 +20,7 @@ typedef struct {
     const char *romm_url, *pair_code, *active_theme;
     VpRommConnectionState romm_state;
     bool busy;
-    bool refresh_notice;
+    unsigned int notice_id;
 } VpUiFrame;
 
 void vp_ui_render(const VpUiFrame *frame);
