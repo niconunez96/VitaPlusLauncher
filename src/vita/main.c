@@ -15,6 +15,7 @@
 
 #include "vita_backend.h"
 #include "vitaplus.h"
+#include "ui_audio.h"
 #include "ui_renderer.h"
 
 #define RGBA(r, g, b, a) ((unsigned int)((r) | ((g) << 8) | ((b) << 16) | ((a) << 24)))
@@ -523,6 +524,7 @@ static void background_job_poll(VpApp *app) {
                            destination);
         }
         (void)snprintf(app->notice, sizeof(app->notice), "Descarga finalizada; presiona X para jugar");
+        vp_ui_audio_play(VP_UI_SOUND_DOWNLOAD_COMPLETE);
         (void)start_next_download();
     } else if (kind == VP_JOB_INSTALL_HOMEBREW) {
         VpItem *completed = vp_catalog_find(&app->catalog, item.id);
@@ -629,23 +631,37 @@ static void settings_finish_ime(VpApp *app) {
 
 static void handle_settings_input(VpApp *app, unsigned int pressed) {
     if (!settings_detail_active) {
-        if (pressed & SCE_CTRL_UP && settings_section > 0) settings_section--;
-        if (pressed & SCE_CTRL_DOWN && settings_section < 2) settings_section++;
-        if (pressed & SCE_CTRL_CROSS) settings_detail_active = true;
+        if (pressed & SCE_CTRL_UP && settings_section > 0) {
+            settings_section--;
+            vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+        }
+        if (pressed & SCE_CTRL_DOWN && settings_section < 2) {
+            settings_section++;
+            vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+        }
+        if (pressed & SCE_CTRL_CROSS) {
+            settings_detail_active = true;
+            vp_ui_audio_play(VP_UI_SOUND_ENTER);
+        }
         return;
     }
     if (pressed & SCE_CTRL_CIRCLE) {
         settings_detail_active = false;
+        vp_ui_audio_play(VP_UI_SOUND_BACK);
         return;
     }
     if (settings_section == 2) {
         VpDownloadEntry *entry;
         if (download_queue.count == 0) return;
         if (download_selection >= download_queue.count) download_selection = download_queue.count - 1;
-        if (pressed & SCE_CTRL_UP)
+        if (pressed & SCE_CTRL_UP) {
             download_selection = (download_selection + download_queue.count - 1) % download_queue.count;
-        if (pressed & SCE_CTRL_DOWN)
+            vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+        }
+        if (pressed & SCE_CTRL_DOWN) {
             download_selection = (download_selection + 1) % download_queue.count;
+            vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+        }
         entry = &download_queue.entries[download_selection];
         if (pressed & SCE_CTRL_CROSS) {
             if (entry->state == VP_DOWNLOAD_FAILED || entry->state == VP_DOWNLOAD_CANCELED) {
@@ -667,8 +683,14 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         return;
     }
     if (settings_section != 0) return;
-    if (pressed & SCE_CTRL_UP) settings_field = (settings_field + 3) % 4;
-    if (pressed & SCE_CTRL_DOWN) settings_field = (settings_field + 1) % 4;
+    if (pressed & SCE_CTRL_UP) {
+        settings_field = (settings_field + 3) % 4;
+        vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+    }
+    if (pressed & SCE_CTRL_DOWN) {
+        settings_field = (settings_field + 1) % 4;
+        vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+    }
     if (pressed & SCE_CTRL_CROSS) {
         if (settings_field == 2) {
             if (sync_romm_catalog(app))
@@ -960,6 +982,7 @@ static void activate_selected(VpApp *app) {
         }
         (void)start_next_download();
         (void)snprintf(app->notice, sizeof(app->notice), "%.110s agregada a Descargas", item->title);
+        vp_ui_audio_play(VP_UI_SOUND_DOWNLOAD_START);
         return;
     }
     (void)snprintf(app->notice, sizeof(app->notice), "Este elemento no tiene un archivo ejecutable");
@@ -1100,6 +1123,7 @@ int main(void) {
     vita2d_init();
     font = vita2d_load_default_pgf();
     if (font == NULL) return 1;
+    (void)vp_ui_audio_init();
     (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
     for (;;) {
@@ -1120,28 +1144,68 @@ int main(void) {
         if (pressed & SCE_CTRL_START) break;
         if (app.active_screen == VP_SCREEN_SETTINGS) {
             handle_settings_input(&app, pressed);
-            if (!settings_ime_active && !settings_detail_active && (pressed & SCE_CTRL_LTRIGGER))
+            if (!settings_ime_active && !settings_detail_active && (pressed & SCE_CTRL_LTRIGGER)) {
                 vp_app_cycle_screen(&app, -1);
-            if (!settings_ime_active && !settings_detail_active && (pressed & SCE_CTRL_RTRIGGER))
+                vp_ui_audio_play(VP_UI_SOUND_TAB);
+            }
+            if (!settings_ime_active && !settings_detail_active && (pressed & SCE_CTRL_RTRIGGER)) {
                 vp_app_cycle_screen(&app, 1);
+                vp_ui_audio_play(VP_UI_SOUND_TAB);
+            }
         } else {
-            if (pressed & SCE_CTRL_LTRIGGER) vp_app_cycle_screen(&app, -1);
-            if (pressed & SCE_CTRL_RTRIGGER) vp_app_cycle_screen(&app, 1);
+            if (pressed & SCE_CTRL_LTRIGGER) {
+                vp_app_cycle_screen(&app, -1);
+                vp_ui_audio_play(VP_UI_SOUND_TAB);
+            }
+            if (pressed & SCE_CTRL_RTRIGGER) {
+                vp_app_cycle_screen(&app, 1);
+                vp_ui_audio_play(VP_UI_SOUND_TAB);
+            }
             if (app.active_screen == VP_SCREEN_LIBRARY) {
                 int columns = app.library_level == VP_LEVEL_PLATFORMS
                                   ? 4
                                   : (app.active_view == VP_VIEW_GRID ? 4 : (app.active_view == VP_VIEW_LIST ? 1 : 3));
-                if (pressed & SCE_CTRL_UP) vp_app_move(&app, 0, -1, columns);
-                if (pressed & SCE_CTRL_DOWN) vp_app_move(&app, 0, 1, columns);
-                if (pressed & SCE_CTRL_LEFT) vp_app_move(&app, -1, 0, columns);
-                if (pressed & SCE_CTRL_RIGHT) vp_app_move(&app, 1, 0, columns);
+                if (pressed & SCE_CTRL_UP) {
+                    size_t selected_platform = app.selected_platform;
+                    size_t selected_item = app.selected_item;
+                    vp_app_move(&app, 0, -1, columns);
+                    if (selected_platform != app.selected_platform || selected_item != app.selected_item)
+                        vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+                }
+                if (pressed & SCE_CTRL_DOWN) {
+                    size_t selected_platform = app.selected_platform;
+                    size_t selected_item = app.selected_item;
+                    vp_app_move(&app, 0, 1, columns);
+                    if (selected_platform != app.selected_platform || selected_item != app.selected_item)
+                        vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+                }
+                if (pressed & SCE_CTRL_LEFT) {
+                    size_t selected_platform = app.selected_platform;
+                    size_t selected_item = app.selected_item;
+                    vp_app_move(&app, -1, 0, columns);
+                    if (selected_platform != app.selected_platform || selected_item != app.selected_item)
+                        vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+                }
+                if (pressed & SCE_CTRL_RIGHT) {
+                    size_t selected_platform = app.selected_platform;
+                    size_t selected_item = app.selected_item;
+                    vp_app_move(&app, 1, 0, columns);
+                    if (selected_platform != app.selected_platform || selected_item != app.selected_item)
+                        vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+                }
                 if (pressed & SCE_CTRL_TRIANGLE) vp_app_cycle_view(&app);
                 if ((pressed & SCE_CTRL_SQUARE) && app.library_level == VP_LEVEL_ROMS &&
                     app.selected_item < app.catalog.count)
                     vp_item_toggle_favorite(&app.catalog.items[app.selected_item]);
-                if (pressed & SCE_CTRL_CIRCLE) vp_app_back(&app);
+                if (pressed & SCE_CTRL_CIRCLE) {
+                    vp_app_back(&app);
+                    vp_ui_audio_play(VP_UI_SOUND_BACK);
+                }
                 if (pressed & SCE_CTRL_CROSS) {
-                    if (app.library_level == VP_LEVEL_PLATFORMS) vp_app_open(&app);
+                    if (app.library_level == VP_LEVEL_PLATFORMS) {
+                        vp_app_open(&app);
+                        vp_ui_audio_play(VP_UI_SOUND_ENTER);
+                    }
                     else activate_selected(&app);
                 }
             }
@@ -1160,6 +1224,7 @@ int main(void) {
         rendered_once = true;
     }
     vp_ui_shutdown();
+    vp_ui_audio_shutdown();
     {
         size_t index;
         for (index = 0; index < VP_COVER_SLOTS; index++)

@@ -14,6 +14,7 @@ test-ui: build/test_presentation
 
 test-vita-lifecycle:
 	python3 tests/test_vita_render_lifecycle.py
+	python3 tests/test_vita_audio.py
 
 build/test_presentation: src/vita/ui_presentation.c src/vita/ui_presentation.h tests/test_presentation.c
 	@mkdir -p build

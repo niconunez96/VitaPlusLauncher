@@ -22,6 +22,7 @@ if(DEFINED ENV{VITASDK})
 
   add_executable(vitaplus
     src/vita/main.c
+    src/vita/ui_audio.c
     src/vita/ui_presentation.c
     src/vita/ui_renderer.c
     src/vita/vita_backend.c)
@@ -29,7 +30,7 @@ if(DEFINED ENV{VITASDK})
   target_compile_options(vitaplus PRIVATE -Werror=frame-larger-than=16384)
   target_link_libraries(vitaplus vitaplus_core vita2d png jpeg curl zip z zstd bz2 lzma ssl crypto m pthread
     SceCtrl_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub SceCommonDialog_stub SceIme_stub
-    ScePgf_stub SceIofilemgr_stub SceNet_stub SceNetCtl_stub SceSsl_stub SceSysmodule_stub
+    ScePgf_stub SceIofilemgr_stub SceNet_stub SceNetCtl_stub SceSsl_stub SceSysmodule_stub SceAudio_stub
     ScePromoterUtil_stub_weak)
   configure_file("$ENV{VITASDK}/arm-vita-eabi/ssl/openssl.cnf"
     "${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf" COPYONLY)
@@ -65,6 +66,12 @@ if(DEFINED ENV{VITASDK})
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/controller-tiles/RomM-AGPL-3.0.txt assets/licenses/RomM-AGPL-3.0.txt
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/controller-tiles/romm-isotipo.svg assets/licenses/romm-isotipo.svg
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/controller-tiles/NOTICE.md assets/licenses/controller-icons.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/01-navegacion-alternativa.wav assets/audio/01-navegacion-alternativa.wav
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/02-cambio-tab.wav assets/audio/02-cambio-tab.wav
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/03-entrar.wav assets/audio/03-entrar.wav
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/04-volver-salir.wav assets/audio/04-volver-salir.wav
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/05-iniciar-descarga.wav assets/audio/05-iniciar-descarga.wav
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/06-descarga-completa.wav assets/audio/06-descarga-completa.wav
            ${VP_AURORA_FILES})
 else()
   message(STATUS "VITASDK not set: only vitaplus_core is configured")
