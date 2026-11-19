@@ -8,3 +8,4 @@ dist/
 *.suprx
 *.skprx
 .vscode/
+__pycache__
