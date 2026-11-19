@@ -49,6 +49,26 @@ class VitaAudioTests(unittest.TestCase):
         self.assertIn("sceAudioOutReleasePort", audio)
         self.assertIn("SCE_AUDIO_OUT_MODE_MONO", audio)
 
+    def test_pcm_buffer_start_address_is_64_byte_aligned(self):
+        audio = (ROOT / "src" / "vita" / "ui_audio.c").read_text()
+        self.assertRegex(
+            audio,
+            r"_Alignas\(64\)\s+static\s+int16_t\s+samples\s*\[VP_UI_AUDIO_BUFFER_SAMPLES\]",
+        )
+
+    def test_volume_sets_both_channels_even_for_a_mono_port(self):
+        audio = (ROOT / "src" / "vita" / "ui_audio.c").read_text()
+        self.assertRegex(audio, r"int\s+volumes\[2\]\s*=\s*\{\s*volume\s*,\s*volume\s*\}")
+        self.assertIn("SCE_AUDIO_VOLUME_FLAG_L_CH | SCE_AUDIO_VOLUME_FLAG_R_CH", audio)
+
+    def test_output_buffer_is_drained_before_reuse(self):
+        audio = (ROOT / "src" / "vita" / "ui_audio.c").read_text()
+        sent = "sceAudioOutOutput(port, samples)"
+        drained = "sceAudioOutOutput(port, NULL)"
+        self.assertIn(sent, audio)
+        self.assertIn(drained, audio)
+        self.assertLess(audio.index(sent), audio.index(drained))
+
 
 if __name__ == "__main__":
     unittest.main()
