@@ -22,21 +22,20 @@ writes PNG previews outside the workspace if requested.
 
 ## Asset inventory
 
-| Group | Files | Runtime size |
-| --- | --- | --- |
-| Platform controllers/handhelds | 23 | 128×128 RGB/RGBA |
-| UI symbols, including official RomM | 17 | 64×64 RGB/RGBA |
-| Emblem | 1 | 128×128 RGBA |
-| Wallpaper | 1 | 480×272 RGB |
+| Group | Source location | Files | Runtime size |
+| --- | --- | --- | --- |
+| Platform controllers/handhelds | `assets/aurora/console_icons/` | 23 | 128×128 RGB/RGBA |
+| UI symbols, including official RomM | `assets/aurora/ui_icons/` | 17 | 64×64 RGB/RGBA |
+| Emblem | `assets/aurora/emblem.png` | 1 | 128×128 RGBA |
+| Wallpaper | `assets/aurora/wallpaper.png` | 1 | 480×272 RGB |
 
-`assets/aurora/provenance.tsv` records the original FLUX source inventory.
-`assets/controller-tiles/README.md` records the replacement artwork: square controller
-faces for Arcade, Dreamcast, GBA, Nintendo 3DS, Nintendo DS, GameCube, PS1, PS2, PSP,
-Genesis, SNES and Wii; sixteen modern system symbols; and the official circular RomM
-symbol. CMake selects these 29 sources while preserving the `assets/aurora/` paths
-inside the VPK; the remaining original artwork is unchanged. The runtime contains
-42 PNGs in total. RomM attribution, its original SVG and upstream license are included
-under `assets/licenses/`. Preview sheets and generation-account metadata are not bundled.
+`assets/legacy/provenance.tsv` records the original FLUX source inventory preserved in the repo.
+`assets/aurora/controller-tiles.md` records the replacement artwork and provenance notes for the
+integrated controller/system set. CMake packages all runtime PNGs under flat `assets/aurora/*.png`
+paths inside the VPK, regardless of the grouped source folders used in the repository. The runtime
+contains 42 PNGs in total. RomM attribution, its original SVG and upstream license are included
+under `assets/aurora/licenses/` in the repo and packaged to `assets/licenses/` in the VPK. Preview
+sheets are kept in `assets/aurora/previews/` and are not bundled.
 
 For generated images, prompts and originals can be recovered from those IDs through FLUX history. Signed
 download URLs are deliberately not stored. These are original generated illustrations,
@@ -65,12 +64,18 @@ The compact `O` and `[]` hints mean circle/back and square/favorite respectively
 ## Prepare a replacement
 
 Generate isolated icons on a plain magenta backdrop with generous margins, consistent
-upper-left studio lighting and unlabelled surfaces. Download the original locally, then:
+upper-left studio lighting and unlabelled surfaces. Download the original locally, then place
+the result in the matching grouped source folder:
 
 ```sh
-go run ./scripts/assetprep/main.go -in /tmp/controller.png \
-  -out assets/aurora/platform_snes.png -width 128 -height 128 -key
-go run ./scripts/assetprep/main.go -in /tmp/wallpaper.png \
+go run ./scripts/assetprep \
+  -in /tmp/platform-snes.png \
+  -out assets/aurora/console_icons/platform_snes.png -width 128 -height 128 -key
+go run ./scripts/assetprep \
+  -in /tmp/ui-home.png \
+  -out assets/aurora/ui_icons/ui_home.png -width 64 -height 64 -key
+go run ./scripts/assetprep \
+  -in /tmp/wallpaper.png \
   -out assets/aurora/wallpaper.png -width 480 -height 272
 ```
 
@@ -79,9 +84,10 @@ go run ./scripts/assetprep/main.go -in /tmp/wallpaper.png \
 edges. Source dimensions and bytes are bounded; errors leave existing outputs unchanged.
 The tool writes 8-bit non-interlaced RGB/RGBA PNGs. It does not submit paid generations.
 
-The CMake asset inventory is explicit. All PNGs are bundled under `assets/aurora/`;
-the provenance document is source metadata, not a runtime dependency. The frontend
-accepts only the exact expected dimensions and ≤512 KiB per bundled image. Loading
+The CMake asset inventory is explicit. Runtime PNGs are bundled as flat `assets/aurora/*.png`
+entries in the VPK, even though source artwork is grouped in `console_icons/` and `ui_icons/`.
+The original provenance document is kept as source metadata in `assets/legacy/provenance.tsv`.
+The frontend accepts only the exact expected dimensions and ≤512 KiB per bundled image. Loading
 is one-shot and limited to one new bundled texture per frame. Files cannot add scripts
 or change the catalog. All loaded bundled textures and covers are freed before shutdown.
 

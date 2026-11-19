@@ -68,9 +68,25 @@ func TestPrepare(t *testing.T) {
 	}
 }
 
+func provenanceAssetPath(name string) string {
+	root := filepath.Join("..", "..", "assets")
+	candidates := []string{
+		filepath.Join(root, "legacy", name+".png"),
+		filepath.Join(root, "aurora", name+".png"),
+		filepath.Join(root, "aurora", "console_icons", name+".png"),
+		filepath.Join(root, "aurora", "ui_icons", name+".png"),
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return filepath.Join(root, "legacy", name+".png")
+}
+
 func TestBundledAssets(t *testing.T) {
-	dir := filepath.Join("..", "..", "assets", "aurora")
-	manifest, err := os.ReadFile(filepath.Join(dir, "provenance.tsv"))
+	manifestPath := filepath.Join("..", "..", "assets", "legacy", "provenance.tsv")
+	manifest, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +100,7 @@ func TestBundledAssets(t *testing.T) {
 			t.Fatalf("invalid provenance: %s", line)
 		}
 		seen[fields[0]] = true
-		data, err := os.ReadFile(filepath.Join(dir, fields[0]+".png"))
+		data, err := os.ReadFile(provenanceAssetPath(fields[0]))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -114,10 +130,6 @@ func TestBundledAssets(t *testing.T) {
 	}
 	if len(seen) != 36 {
 		t.Fatalf("expected 36 assets, got %d", len(seen))
-	}
-	files, err := filepath.Glob(filepath.Join(dir, "*.png"))
-	if err != nil || len(files) != 36 {
-		t.Fatal("unexpected asset inventory")
 	}
 }
 

@@ -21,7 +21,8 @@ include/                 API portable del núcleo
 src/core/                modelo, catálogo, temas, providers y transferencias
 src/vita/                frontend Vita2D y presentación Aurora
 themes/default/          tema base editable
-assets/aurora/           iconos y fondo originales generados con FLUX
+assets/aurora/           artwork activo agrupado (console_icons/, ui_icons/, wallpaper/emblem, licencias/previews)
+assets/legacy/           inventario original y provenance.tsv histórico
 tests/                   pruebas host con gcc
 docs/                    arquitectura y contrato de providers
 ```

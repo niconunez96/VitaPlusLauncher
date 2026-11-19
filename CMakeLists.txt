@@ -36,6 +36,7 @@ if(DEFINED ENV{VITASDK})
     "${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf" COPYONLY)
   vita_create_self(eboot.bin vitaplus UNSAFE)
   # Explicit inventory: a missing generated icon must fail packaging, not ship silently.
+  # Runtime VPK paths stay flat under assets/aurora/; source artwork is grouped by kind.
   set(VP_AURORA_ASSETS wallpaper emblem
     platform_nes platform_famicom platform_snes platform_gameboy platform_gba platform_nds
     platform_genesis platform_mastersystem platform_gamegear platform_psx platform_psp platform_vita
@@ -43,17 +44,14 @@ if(DEFINED ENV{VITASDK})
     platform_dreamcast platform_n3ds platform_gamecube platform_ps2 platform_wii
     ui_library ui_home ui_store ui_settings ui_download ui_check ui_star ui_search
     ui_play ui_back ui_grid ui_list ui_carousel ui_sync ui_key ui_folder ui_romm)
-  set(VP_CONTROLLER_ASSETS
-    platform_arcade platform_dreamcast platform_gba platform_n3ds platform_nds platform_gamecube
-    platform_psx platform_ps2 platform_psp platform_genesis platform_snes platform_wii
-    ui_library ui_home ui_store ui_settings ui_download ui_check ui_star ui_search
-    ui_play ui_back ui_grid ui_list ui_carousel ui_sync ui_key ui_folder ui_romm)
   set(VP_AURORA_FILES)
   foreach(asset IN LISTS VP_AURORA_ASSETS)
-    if(asset IN_LIST VP_CONTROLLER_ASSETS)
-      set(asset_source "assets/controller-tiles/${asset}.png")
-    else()
+    if(asset STREQUAL "wallpaper" OR asset STREQUAL "emblem")
       set(asset_source "assets/aurora/${asset}.png")
+    elseif(asset MATCHES "^platform_")
+      set(asset_source "assets/aurora/console_icons/${asset}.png")
+    else()
+      set(asset_source "assets/aurora/ui_icons/${asset}.png")
     endif()
     list(APPEND VP_AURORA_FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/${asset_source}" "assets/aurora/${asset}.png")
@@ -63,9 +61,9 @@ if(DEFINED ENV{VITASDK})
      NAME ${VITA_APP_NAME}
      FILE ${CMAKE_CURRENT_SOURCE_DIR}/themes/default/theme.ini assets/default/theme.ini
             ${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf openssl.cnf
-            ${CMAKE_CURRENT_SOURCE_DIR}/assets/controller-tiles/RomM-AGPL-3.0.txt assets/licenses/RomM-AGPL-3.0.txt
-            ${CMAKE_CURRENT_SOURCE_DIR}/assets/controller-tiles/romm-isotipo.svg assets/licenses/romm-isotipo.svg
-            ${CMAKE_CURRENT_SOURCE_DIR}/assets/controller-tiles/NOTICE.md assets/licenses/controller-icons.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/aurora/licenses/RomM-AGPL-3.0.txt assets/licenses/RomM-AGPL-3.0.txt
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/aurora/licenses/romm-isotipo.svg assets/licenses/romm-isotipo.svg
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/aurora/licenses/NOTICE.md assets/licenses/controller-icons.md
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/01-navegacion-alternativa.wav assets/audio/01-navegacion-alternativa.wav
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/02-cambio-tab.wav assets/audio/02-cambio-tab.wav
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/03-entrar.wav assets/audio/03-entrar.wav

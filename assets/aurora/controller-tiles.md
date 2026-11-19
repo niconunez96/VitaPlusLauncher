@@ -1,6 +1,6 @@
 # Controller tile artwork — integrated platform set
 
-The launcher selects this artwork during VPK packaging. CMake installs the 29 selected PNGs at the existing `assets/aurora/` runtime paths, retaining other Aurora artwork. Source files remain here rather than being copied over the original generation set. The system PGF font and theme palette are retained.
+The launcher selects this artwork during VPK packaging. CMake installs the 29 selected PNGs at flat `assets/aurora/` runtime paths inside the VPK, retaining other Aurora artwork. In the repository, these source files now live under grouped folders in `assets/aurora/` (`console_icons/` and `ui_icons/`), while previews and license/attribution files live in `assets/aurora/previews/` and `assets/aurora/licenses/`. The system PGF font and theme palette are retained.
 
 ## Ready for integration
 

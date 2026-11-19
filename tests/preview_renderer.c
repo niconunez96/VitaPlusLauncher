@@ -22,13 +22,20 @@ static const vita2d_texture *check_texture;
 static int status_seen, pair_hint_seen, check_seen;
 void vp_ui_test_label(vita2d_pgf *font,int width,const char *value);
 
-/* Mirror CMake's selected source files while preserving the app0 runtime path. */
+/* Mirror grouped source artwork while preserving the flat app0 runtime path. */
 static const char *asset_source(const char *path) {
     static char candidate[256];
     const char *base=path+5;
+    const char *name;
     FILE *file;
     if (strncmp(base,"assets/aurora/",14)!=0) return base;
-    snprintf(candidate,sizeof(candidate),"assets/controller-tiles/%s",base+14);
+    name=base+14;
+    if (strncmp(name,"platform_",9)==0)
+        snprintf(candidate,sizeof(candidate),"assets/aurora/console_icons/%s",name);
+    else if (strncmp(name,"ui_",3)==0)
+        snprintf(candidate,sizeof(candidate),"assets/aurora/ui_icons/%s",name);
+    else
+        snprintf(candidate,sizeof(candidate),"assets/aurora/%s",name);
     file=fopen(candidate,"rb");
     if (!file) return base;
     fclose(file); return candidate;
