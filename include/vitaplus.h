@@ -150,6 +150,29 @@ typedef struct {
     char image_proxy_url[VP_URL];
 } VpRommConfig;
 
+typedef enum {
+    VP_ROMM_UNCONFIGURED,
+    VP_ROMM_CHECKING,
+    VP_ROMM_CONNECTED,
+    VP_ROMM_INVALID_TOKEN,
+    VP_ROMM_FORBIDDEN,
+    VP_ROMM_UNREACHABLE
+} VpRommConnectionState;
+
+/* HTTP status of a complete response, or zero for transport/truncation failures. */
+typedef long (*VpRommProbeFn)(const char *url, const char *token, char *response,
+                              size_t capacity, void *context);
+typedef struct {
+    VpRommProbeFn execute;
+    void *context;
+} VpRommProbeBackend;
+
+/* Owned by the UI thread. Workers return a result tagged with its revision. */
+typedef struct {
+    unsigned long revision;
+    VpRommConnectionState state;
+} VpRommConnection;
+
 typedef struct {
     char catalog_url[VP_URL];
 } VpHomebrewConfig;
@@ -243,6 +266,12 @@ bool vp_local_import_manifest(VpCatalog *catalog, const char *manifest);
 bool vp_romm_import(VpCatalog *catalog, const char *json);
 bool vp_romm_exchange_pair_code(VpRommConfig *config, const char *code,
                                 VpRommPairBackend backend);
+VpRommConnectionState vp_romm_check_connection(const VpRommConfig *config,
+                                               VpRommProbeBackend backend);
+void vp_romm_connection_reset(VpRommConnection *connection, const VpRommConfig *config);
+bool vp_romm_connection_apply(VpRommConnection *connection, unsigned long revision,
+                              VpRommConnectionState state);
+bool vp_romm_pair_code_enabled(VpRommConnectionState state);
 bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
                   VpFetchBackend backend);
 bool vp_cache_cover(const VpItem *item, const VpRommConfig *config, const char *destination,

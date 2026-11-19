@@ -6,6 +6,23 @@ Un provider obtiene datos remotos y los normaliza a `VpItem`. El núcleo nunca e
 
 ## RomM
 
+### Estado de conexión en Ajustes
+
+Al iniciar y al abrir los ajustes de RomM, VitaPlus comprueba el acceso con una petición autenticada en segundo plano. Tener un token en `config.ini` no basta para mostrar la conexión como válida. También se comprueba antes de sincronizar y después de canjear un código.
+
+| Estado | Mensaje y pair code |
+| --- | --- |
+| Conectado | Check de confirmación y pair code deshabilitado; una biblioteca vacía también cuenta como conexión válida. |
+| Comprobando | Pair code temporalmente deshabilitado mientras se verifica el acceso. |
+| Sin configurar | Advertencia para configurar URL y pair code. |
+| Token rechazado (`401`) | Error indicando que el token ya no funciona y pair code habilitado. |
+| Sin permisos (`403`) | Error de permisos de lectura y pair code habilitado. |
+| Red, servidor o respuesta inesperada | Advertencia de que no se pudo verificar, sin borrar el token ni afirmar que es inválido; pair code habilitado. |
+
+Para reintentar, vuelve a entrar en los ajustes de RomM o sincroniza con `X` en **Sincronizar ahora** o con `Triángulo`. Cambiar la URL invalida la comprobación anterior: los resultados pendientes del servidor anterior no se aplican a los ajustes actuales. El canje exitoso guarda el nuevo token aunque falle la sincronización posterior.
+
+### Catálogo
+
 `vp_romm_sync()` solicita:
 
 ```text

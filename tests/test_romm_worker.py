@@ -1,0 +1,126 @@
+"""Execute the Vita worker/publication branches with deterministic host backends.
+
+This checks credential-state integration, not Vita threading or SDK behavior.
+"""
+
+import os
+from pathlib import Path
+import shlex
+import subprocess
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class RommWorkerTests(unittest.TestCase):
+    def test_later_rejection_overrides_probe_and_stale_results_cannot_publish(self):
+        source = (ROOT / "src/vita/main.c").read_text()
+        worker = source[source.index("    if (kind == VP_JOB_VALIDATE_ROMM) {"):
+                        source.index("    } else if (kind == VP_JOB_SYNC_COVERS) {")] + "    }\n"
+        start = source.index("    if (kind == VP_JOB_VALIDATE_ROMM || kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC) {",
+                             source.index("static void background_job_poll"))
+        end = source.index("    if (kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC) {", start)
+        poll = source[start:end]
+        adapter = ""
+        if "static bool fetch_romm_catalog(" in source:
+            start = source.index("static bool fetch_romm_catalog(")
+            adapter = source[start:source.index("\n}", start) + 2]
+        prefix = r'''
+#include "vitaplus.h"
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+enum {VP_JOB_VALIDATE_ROMM, VP_JOB_SYNC_PROVIDERS, VP_JOB_PAIR_AND_SYNC,
+      VP_JOB_SYNC_COVERS, VP_JOB_DOWNLOAD_ROM, VP_JOB_FETCH_COVER};
+typedef struct {VpCatalog catalog; VpRommConnectionState romm_state; bool token_exchanged;} Job;
+static Job storage;
+static VpRommConfig romm_config, saved;
+static VpRommConnection romm_connection;
+static char romm_pair_code[VP_TEXT];
+static VpApp application;
+static int saves, requests;
+static long catalog_status;
+static const char *vp_vita_last_error(void) {return "catalog failure";}
+static long vp_vita_probe_romm(const char *u,const char *t,char *r,size_t n,void *c) {
+    (void)u;(void)t;(void)c;
+    snprintf(r,n,"{\"items\":[],\"total\":0}");
+    return requests++ == 0 ? 200 : catalog_status;
+}
+static bool vp_vita_fetch(const char *u,const char *t,char *r,size_t n,void *c) {
+    (void)u;(void)t;(void)r;(void)n;(void)c; requests++;return false;
+}
+static bool vp_vita_exchange_pair_code(const char *u,const char *t,char *r,size_t n,void *c) {
+    (void)u;(void)t;(void)c;snprintf(r,n,"{\"raw_token\":\"new-token\"}");return true;
+}
+static bool save_catalog_cache(const VpCatalog *c,const VpRommConfig *r) {(void)c;(void)r;return true;}
+static bool save_romm_config(void) {saved=romm_config;saves++;return true;}
+static bool start_next_download(void) {return false;}
+static void mark_cover_unavailable(const char *id) {(void)id;}
+'''
+        run = r'''
+static void run(int kind, unsigned long revision) {
+    Job *job=&storage;
+    VpRommConfig config=romm_config;
+    VpHomebrewConfig homebrew={0};
+    const char *pair_code="ABCD1234";
+    bool succeeded=false,romm_requested=false,homebrew_requested=false;
+    requests=0; job->token_exchanged=false;
+'''
+        finish = r'''
+finish:;
+    VpApp *app=&application;
+    VpItem item={0};
+    unsigned long romm_revision=revision;
+    VpRommConnectionState romm_state=job->romm_state;
+    bool token_exchanged=job->token_exchanged;
+    const char *error=vp_vita_last_error();
+'''
+        cases = r'''
+}
+int main(void) {
+    VpRommConfig before;
+    const long statuses[]={401,403,0,503};
+    const VpRommConnectionState expected[]={VP_ROMM_INVALID_TOKEN,VP_ROMM_FORBIDDEN,
+                                           VP_ROMM_UNREACHABLE,VP_ROMM_UNREACHABLE};
+    size_t i;
+    strcpy(romm_config.base_url,"https://a.test");strcpy(romm_config.token,"old-token");
+    before=romm_config;
+    for (i=0;i<sizeof(statuses)/sizeof(statuses[0]);i++) {
+        catalog_status=statuses[i];
+        vp_romm_connection_reset(&romm_connection,&romm_config);
+        run(VP_JOB_SYNC_PROVIDERS,romm_connection.revision);
+        assert(requests==2);
+        assert(romm_connection.state==expected[i]);
+        assert(vp_romm_pair_code_enabled(romm_connection.state));
+        assert(memcmp(&before,&romm_config,sizeof(before))==0);
+    }
+    catalog_status=401;
+    run(VP_JOB_PAIR_AND_SYNC,romm_connection.revision);
+    assert(saves==1 && strcmp(saved.token,"new-token")==0);
+    assert(romm_connection.state==VP_ROMM_INVALID_TOKEN);
+    unsigned long stale=romm_connection.revision;
+    strcpy(romm_config.base_url,"https://b.test");vp_romm_connection_reset(&romm_connection,&romm_config);
+    strcpy(romm_config.base_url,"https://a.test");vp_romm_connection_reset(&romm_connection,&romm_config);
+    before=romm_config;
+    run(VP_JOB_PAIR_AND_SYNC,stale);
+    assert(saves==1 && memcmp(&before,&romm_config,sizeof(before))==0);
+    assert(romm_connection.state==VP_ROMM_CHECKING);
+    puts("RomM worker rejection, persistence and stale-result probes: PASS");
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="vitaplus-romm-") as directory:
+            probe = Path(directory) / "probe.c"
+            binary = Path(directory) / "probe"
+            probe.write_text(prefix + adapter + run + worker + finish + poll + cases)
+            subprocess.run(shlex.split(os.environ.get("CC", "cc")) + [
+                "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+                "-I" + str(ROOT / "include"), str(ROOT / "src/core/vitaplus.c"),
+                str(probe), "-o", str(binary)], check=True)
+            subprocess.run([str(binary)], check=True, cwd=directory)
+
+
+if __name__ == "__main__":
+    unittest.main()

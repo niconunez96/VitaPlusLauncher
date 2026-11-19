@@ -17,6 +17,9 @@ static int probe_width=-1;
 static char drawn_text[VP_URL+4];
 static int selected_seen, row_count, line_one, line_two;
 static char expected_title[64];
+static const char *expected_status;
+static const vita2d_texture *check_texture;
+static int status_seen, pair_hint_seen, check_seen;
 void vp_ui_test_label(vita2d_pgf *font,int width,const char *value);
 
 /* Mirror CMake's selected source files while preserving the app0 runtime path. */
@@ -46,6 +49,7 @@ void vita2d_draw_line(float x,float y,float xx,float yy,unsigned int c) {
 }
 void vita2d_draw_texture_tint_scale(const vita2d_texture *t,float x,float y,float sx,float sy,unsigned int tint) {
     assert(t && t->surface && sx>0 && sy>0);
+    if (t==check_texture && x==76 && y==212) check_seen++;
     cairo_save(cr); cairo_translate(cr,x,y); cairo_scale(cr,sx,sy);
     cairo_set_source_surface(cr,t->surface,0,0);
     cairo_paint_with_alpha(cr,(tint>>24)/255.); cairo_restore(cr);
@@ -58,6 +62,7 @@ vita2d_texture *vita2d_load_PNG_file(const char *path) {
         "platform_genesis","platform_snes","platform_wii","ui_romm"};
     size_t i;
     vita2d_texture *t=calloc(1,sizeof(*t)); assert(t);
+    if (strstr(path,"ui_check.png")) check_texture=t;
     for (i=0;i<sizeof(expected)/sizeof(expected[0]);i++) if (strstr(path,expected[i])) loaded|=1u<<i;
     t->surface=cairo_image_surface_create_from_png(asset_source(path));
     assert(cairo_surface_status(t->surface)==CAIRO_STATUS_SUCCESS);
@@ -81,6 +86,8 @@ int vita2d_pgf_draw_text(vita2d_pgf *f,int x,int y,unsigned int c,float scale,co
     int width=vita2d_pgf_text_width(f,scale,s);
     assert(scale>=.75f);
     if (strcmp(s,expected_title)==0) selected_seen++;
+    if (expected_status && strcmp(s,expected_status)==0) status_seen++;
+    if (strstr(s,"X para ingresar el codigo")) pair_hint_seen++;
     if (x==120 && (y==169 || y==233 || y==297 || y==361)) row_count++;
     if (x==124 && y==178 && strlen(s)>0) line_one++;
     if (x==124 && y==202 && strlen(s)>0) line_two++;
@@ -155,6 +162,28 @@ int main(int argc,char **argv) {
     frame.app=&app; frame.font=&font; frame.groups=groups; frame.group_count=12;
     frame.visible=visible; frame.visible_count=12; frame.downloads=&queue;
     frame.active_theme="default"; frame.romm_url="https://romm.example.test"; frame.pair_code="";
+    {
+        const VpRommConnectionState states[]={VP_ROMM_UNCONFIGURED,VP_ROMM_CHECKING,
+            VP_ROMM_CONNECTED,VP_ROMM_INVALID_TOKEN,VP_ROMM_FORBIDDEN,VP_ROMM_UNREACHABLE};
+        const char *messages[]={"Configura la URL y genera un pair code en RomM.",
+            "Comprobando la conexion con RomM...", "RomM conectado correctamente.",
+            "El token ya no funciona. Ingresa un nuevo pair code.",
+            "El token no tiene permisos de lectura. Revisa RomM.",
+            "No se pudo verificar RomM. Revisa la red y reintenta."};
+        app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true;
+        for (i=0;i<sizeof(states)/sizeof(states[0]);i++) {
+            size_t warmup;
+            frame.romm_state=states[i]; expected_status=NULL;
+            for (warmup=0;warmup<40;warmup++) vp_ui_render(&frame);
+            expected_status=messages[i];
+            status_seen=pair_hint_seen=check_seen=0;
+            vp_ui_render(&frame);
+            assert(status_seen==1);
+            assert(pair_hint_seen==(vp_romm_pair_code_enabled(states[i])?1:0));
+            assert(check_seen==(states[i]==VP_ROMM_CONNECTED?1:0));
+        }
+        expected_status=NULL;
+    }
     for (c=0;c<sizeof(cases)/sizeof(cases[0]);c++) {
         char path[1024];
         app.active_screen=VP_SCREEN_LIBRARY; app.library_level=VP_LEVEL_PLATFORMS; app.selected_platform=0;

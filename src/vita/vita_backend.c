@@ -261,8 +261,8 @@ static bool promote_vpk(const char *vpk_path) {
     return result == 0;
 }
 
-bool vp_vita_fetch(const char *url, const char *bearer_token,
-                   char *response, size_t response_capacity, void *context) {
+long vp_vita_probe_romm(const char *url, const char *bearer_token,
+                        char *response, size_t response_capacity, void *context) {
     CURL *curl;
     struct curl_slist *headers = NULL;
     ResponseBuffer buffer;
@@ -302,7 +302,13 @@ bool vp_vita_fetch(const char *url, const char *bearer_token,
     record_http_failure(url, result, status, response, buffer.truncated);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    return result == CURLE_OK && status >= 200 && status < 300 && buffer.used > 0;
+    return result == CURLE_OK && !buffer.truncated ? status : 0;
+}
+
+bool vp_vita_fetch(const char *url, const char *bearer_token,
+                   char *response, size_t response_capacity, void *context) {
+    long status = vp_vita_probe_romm(url, bearer_token, response, response_capacity, context);
+    return status >= 200 && status < 300 && response[0] != '\0';
 }
 
 bool vp_vita_exchange_pair_code(const char *url, const char *code,

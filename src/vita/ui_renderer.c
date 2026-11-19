@@ -343,16 +343,33 @@ static void settings(const VpUiFrame *f) {
     {
         const char *titles[]={"URL del servidor","Pair code","Sincronizar ahora","Sincronizar metadata"};
         const char *symbols[]={"ui_home","ui_key","ui_sync","ui_folder"};
-        const char *values[]={f->romm_url[0]?f->romm_url:"X para configurar",f->pair_code[0]?"Codigo ingresado; Triangulo para canjear":"X para ingresar el codigo de 8 caracteres","Actualiza el catalogo en segundo plano","Descarga y prepara las caratulas"};
+        bool pair_enabled=vp_romm_pair_code_enabled(f->romm_state);
+        const char *status="Configura la URL y genera un pair code en RomM.";
+        unsigned int status_color=C(244,199,110,255);
+        const char *values[]={f->romm_url[0]?f->romm_url:"X para configurar",
+            pair_enabled?(f->pair_code[0]?"Codigo ingresado; Triangulo para canjear":"X para ingresar el codigo de 8 caracteres"):
+                         (f->romm_state==VP_ROMM_CONNECTED?"Vinculado; no necesitas otro codigo":"Espera a que termine la comprobacion"),
+            "Actualiza el catalogo en segundo plano","Descarga y prepara las caratulas"};
+        switch (f->romm_state) {
+            case VP_ROMM_CONNECTED: status="RomM conectado correctamente."; status_color=C(135,221,164,255); break;
+            case VP_ROMM_CHECKING: status="Comprobando la conexion con RomM..."; status_color=muted; break;
+            case VP_ROMM_INVALID_TOKEN: status="El token ya no funciona. Ingresa un nuevo pair code."; status_color=C(245,166,145,255); break;
+            case VP_ROMM_FORBIDDEN: status="El token no tiene permisos de lectura. Revisa RomM."; status_color=C(245,166,145,255); break;
+            case VP_ROMM_UNREACHABLE: status="No se pudo verificar RomM. Revisa la red y reintenta."; break;
+            default: break;
+        }
         for (i=0;i<4;i++) {
             int y=145+i*62;
-            card(64,y,832,54,f->settings_field==i,accent);
-            icon(symbols[i],76,y+5,40);
-            label(f->font,134,y+23,734,.64f,ink,titles[i]);
+            bool disabled=i==1 && !pair_enabled;
+            card(64,y,832,54,!disabled && f->settings_field==i,accent);
+            icon(i==1 && f->romm_state==VP_ROMM_CONNECTED?"ui_check":symbols[i],76,y+5,40);
+            label(f->font,134,y+23,734,.64f,disabled?muted:ink,titles[i]);
             label(f->font,134,y+44,734,.51f,muted,values[i]);
         }
-        label(f->font,66,421,828,.54f,muted,"X edita/sincroniza  |  Triangulo canjea y guarda  |  Circulo vuelve");
-        label(f->font,66,443,828,.49f,muted,"El codigo se canjea una sola vez. El token nunca se muestra.");
+        label(f->font,66,421,828,.54f,status_color,status);
+        label(f->font,66,450,828,.49f,muted,pair_enabled?
+            "X edita/sincroniza | Triangulo canjea/guarda | Circulo vuelve":
+            "X edita URL/sincroniza | Triangulo guarda/sincroniza | Circulo vuelve");
     }
 }
 

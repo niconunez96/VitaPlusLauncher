@@ -1135,6 +1135,56 @@ bool vp_romm_exchange_pair_code(VpRommConfig *config, const char *code,
     return true;
 }
 
+VpRommConnectionState vp_romm_check_connection(const VpRommConfig *config,
+                                               VpRommProbeBackend backend) {
+    char url[VP_URL];
+    long status;
+    const char *root, *end, *items, *array_end;
+    if (config == NULL || config->base_url[0] == '\0' || config->token[0] == '\0')
+        return VP_ROMM_UNCONFIGURED;
+    if (backend.execute == NULL ||
+        !vp_join_url(url, sizeof(url), config->base_url,
+                     "/api/roms?limit=1&offset=0&with_char_index=false"
+                     "&with_filter_values=false&with_rom_id_index=false"))
+        return VP_ROMM_UNREACHABLE;
+    vp_fetch_response[0] = '\0';
+    status = backend.execute(url, config->token, vp_fetch_response,
+                             sizeof(vp_fetch_response), backend.context);
+    if (status == 401) return VP_ROMM_INVALID_TOKEN;
+    if (status == 403) return VP_ROMM_FORBIDDEN;
+    if (status != 200) return VP_ROMM_UNREACHABLE;
+    /* Reject login pages and incomplete/unexpected envelopes. An empty items array
+     * is a valid authenticated response; catalog population is unrelated. */
+    root = vp_skip_space(vp_fetch_response);
+    end = *root == '{' ? vp_object_end(root) : NULL;
+    if (end == NULL || *vp_skip_space(end) != '\0') return VP_ROMM_UNREACHABLE;
+    items = strstr(root, "\"items\"");
+    if (items == NULL || (items = vp_skip_space(items + 7)) == NULL || *items != ':')
+        return VP_ROMM_UNREACHABLE;
+    items = vp_skip_space(items + 1);
+    if (*items != '[' || (array_end = vp_array_end(items)) == NULL || array_end >= end)
+        return VP_ROMM_UNREACHABLE;
+    return VP_ROMM_CONNECTED;
+}
+
+void vp_romm_connection_reset(VpRommConnection *connection, const VpRommConfig *config) {
+    if (connection == NULL) return;
+    connection->revision++;
+    connection->state = config != NULL && config->base_url[0] && config->token[0]
+                            ? VP_ROMM_CHECKING : VP_ROMM_UNCONFIGURED;
+}
+
+bool vp_romm_connection_apply(VpRommConnection *connection, unsigned long revision,
+                              VpRommConnectionState state) {
+    if (connection == NULL || connection->revision != revision) return false;
+    connection->state = state;
+    return true;
+}
+
+bool vp_romm_pair_code_enabled(VpRommConnectionState state) {
+    return state != VP_ROMM_CONNECTED && state != VP_ROMM_CHECKING;
+}
+
 bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
                   VpFetchBackend backend) {
     char url[VP_URL];

@@ -18,6 +18,7 @@ typedef struct {
     int settings_section, settings_field;
     bool settings_detail;
     const char *romm_url, *pair_code, *active_theme;
+    VpRommConnectionState romm_state;
     bool busy;
     bool refresh_notice;
 } VpUiFrame;

@@ -70,6 +70,79 @@ static bool fake_fetch(const char *url, const char *bearer_token,
     return true;
 }
 
+typedef struct {
+    FetchLog fetch;
+    long status;
+} ProbeLog;
+
+static long fake_probe(const char *url, const char *token, char *response,
+                       size_t capacity, void *context) {
+    ProbeLog *log = context;
+    (void)fake_fetch(url, token, response, capacity, &log->fetch);
+    return log->status;
+}
+
+static void test_romm_connection(void) {
+    ProbeLog log = {.status = 200};
+    VpRommProbeBackend backend = {fake_probe, &log};
+    VpRommConfig config = {0}, before;
+    VpRommConnection connection = {0};
+    unsigned long revision;
+
+    assert(vp_romm_check_connection(&config, backend) == VP_ROMM_UNCONFIGURED);
+    assert(log.fetch.calls == 0);
+    strcpy(config.base_url, "https://romm.local/");
+    assert(vp_romm_check_connection(&config, backend) == VP_ROMM_UNCONFIGURED);
+    strcpy(config.token, "rmm_existing");
+    before = config;
+    assert(vp_romm_check_connection(&config, backend) == VP_ROMM_CONNECTED);
+    assert(strcmp(log.fetch.url, "https://romm.local/api/roms?limit=1&offset=0&with_char_index=false&with_filter_values=false&with_rom_id_index=false") == 0);
+    assert(strcmp(log.fetch.bearer, config.token) == 0);
+    log.fetch.payload = "{\"total\":0,\"items\":[]}";
+    assert(vp_romm_check_connection(&config, backend) == VP_ROMM_CONNECTED);
+    log.status = 401;
+    assert(vp_romm_check_connection(&config, backend) == VP_ROMM_INVALID_TOKEN);
+    log.status = 403;
+    assert(vp_romm_check_connection(&config, backend) == VP_ROMM_FORBIDDEN);
+    {
+        const long failures[] = {0, 301, 404, 500, 503};
+        size_t i;
+        for (i = 0; i < sizeof(failures) / sizeof(failures[0]); i++) {
+            log.status = failures[i];
+            assert(vp_romm_check_connection(&config, backend) == VP_ROMM_UNREACHABLE);
+        }
+    }
+    log.status = 200;
+    {
+        const char *invalid[] = {"", "<html>Login</html>", "{}", "{\"items\":[}",
+                                 "{\"items\":[]", "{\"items\":[]} trailing"};
+        size_t i;
+        for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+            log.fetch.payload = invalid[i];
+            assert(vp_romm_check_connection(&config, backend) == VP_ROMM_UNREACHABLE);
+        }
+    }
+    assert(memcmp(&config, &before, sizeof(config)) == 0);
+
+    vp_romm_connection_reset(&connection, &config);
+    revision = connection.revision;
+    assert(connection.state == VP_ROMM_CHECKING);
+    assert(!vp_romm_pair_code_enabled(connection.state));
+    assert(vp_romm_connection_apply(&connection, revision, VP_ROMM_CONNECTED));
+    assert(!vp_romm_pair_code_enabled(connection.state));
+    vp_romm_connection_reset(&connection, &config);
+    assert(!vp_romm_connection_apply(&connection, revision, VP_ROMM_CONNECTED));
+    assert(connection.state == VP_ROMM_CHECKING);
+    assert(vp_romm_connection_apply(&connection, connection.revision, VP_ROMM_INVALID_TOKEN));
+    assert(vp_romm_pair_code_enabled(connection.state));
+    assert(vp_romm_pair_code_enabled(VP_ROMM_FORBIDDEN));
+    assert(vp_romm_pair_code_enabled(VP_ROMM_UNREACHABLE));
+    config.token[0] = '\0';
+    vp_romm_connection_reset(&connection, &config);
+    assert(connection.state == VP_ROMM_UNCONFIGURED);
+    assert(vp_romm_pair_code_enabled(connection.state));
+}
+
 static bool fake_transfer(const char *url, const char *bearer_token, const char *destination,
                           VpTransferAction action, void *context) {
     TransferLog *log = context;
@@ -695,6 +768,7 @@ int main(void) {
     test_theme();
     test_local_library();
     test_romm_pair_code_exchange();
+    test_romm_connection();
     test_romm_sync();
     test_libretro_thumbnail_safety();
     test_romm_pagination();

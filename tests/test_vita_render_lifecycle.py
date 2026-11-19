@@ -14,6 +14,21 @@ def function_body(signature):
 
 
 class VitaRenderLifecycleTests(unittest.TestCase):
+    def test_romm_validation_stays_in_the_worker(self):
+        worker = function_body("static void *background_job_run(")
+        self.assertIn("vp_romm_check_connection(", worker)
+        for signature in ("static void prepare_shell(", "static bool settings_start_ime(",
+                          "static void handle_settings_input("):
+            self.assertNotIn("vp_romm_check_connection(", function_body(signature))
+        self.assertIn("vp_romm_pair_code_enabled(", function_body("static bool settings_start_ime("))
+        self.assertIn("vp_romm_pair_code_enabled(", function_body("static void handle_settings_input("))
+
+    def test_romm_results_are_revision_guarded_before_publication(self):
+        poll = function_body("static void background_job_poll(")
+        guard = poll.index("vp_romm_connection_apply(")
+        self.assertLess(guard, poll.index("romm_config = config;"))
+        self.assertLess(guard, poll.index("apply_provider_catalog("))
+
     def test_frame_waits_before_preparation_and_pool_reuse(self):
         body = function_body("int main(void)")
         loop = body[body.index("for (;;) {") : body.index("\n    vp_ui_shutdown();")]
