@@ -24,13 +24,21 @@ typedef struct {
     VpUiSound sound;
 } VpUiAudioPlayer;
 
-/* UI sounds are serialized on a dedicated thread because sceAudioOutOutput blocks
- * while a buffer is consumed. Keeping only the newest pending cue prevents rapid
- * directional input from accumulating stale navigation clicks. */
+/* UI sounds are serialized on a dedicated thread because each output buffer is
+ * drained before the next one is submitted. Keeping only the newest pending cue
+ * prevents rapid directional input from accumulating stale navigation clicks. */
 static VpUiAudioPlayer player = {
     .mutex = PTHREAD_MUTEX_INITIALIZER,
     .condition = PTHREAD_COND_INITIALIZER
 };
+
+/* sceAudioOutOutput DMAs directly from this buffer: its start address and size
+ * must both be 64-byte aligned, otherwise the audio is corrupted on hardware.
+ * A stack array has no such guarantee, and a static one also keeps it off the
+ * small Vita thread stack. Buffer size is 1024 frames * 2 bytes = 2048 bytes.
+ * The port only blocks until the buffer is accepted, so play_sound drains it
+ * before the next read overwrites it. Only the audio thread calls play_sound. */
+_Alignas(64) static int16_t samples[VP_UI_AUDIO_BUFFER_SAMPLES];
 
 static const VpUiAudioAsset assets[] = {
     [VP_UI_SOUND_NAVIGATION] = {"app0:assets/audio/01-navegacion-alternativa.wav"},
@@ -80,7 +88,6 @@ static bool seek_pcm_data(FILE *file) {
 
 static void play_sound(int port, VpUiSound sound) {
     FILE *file;
-    int16_t samples[VP_UI_AUDIO_BUFFER_SAMPLES];
     if ((unsigned int)sound >= sizeof(assets) / sizeof(assets[0])) return;
     file = fopen(assets[sound].path, "rb");
     if (file == NULL || !seek_pcm_data(file)) {
@@ -93,6 +100,10 @@ static void play_sound(int port, VpUiSound sound) {
         if (count < VP_UI_AUDIO_BUFFER_SAMPLES)
             memset(samples + count, 0, (VP_UI_AUDIO_BUFFER_SAMPLES - count) * sizeof(samples[0]));
         if (sceAudioOutOutput(port, samples) < 0) break;
+        /* The call above only waits for the buffer to be accepted. NULL waits
+         * until the queued audio has finished, so the shared buffer is safe to
+         * refill on the next iteration. */
+        if (sceAudioOutOutput(port, NULL) < 0) break;
     }
     fclose(file);
 }
@@ -103,7 +114,10 @@ static void *audio_thread(void *context) {
                                    VP_UI_AUDIO_SAMPLE_RATE, SCE_AUDIO_OUT_MODE_MONO);
     if (port >= 0) {
         int volume = SCE_AUDIO_OUT_MAX_VOL / 2;
-        (void)sceAudioOutSetVolume(port, SCE_AUDIO_VOLUME_FLAG_L_CH, &volume);
+        int volumes[2] = { volume, volume };
+        (void)sceAudioOutSetVolume(port,
+                                   SCE_AUDIO_VOLUME_FLAG_L_CH | SCE_AUDIO_VOLUME_FLAG_R_CH,
+                                   volumes);
     }
     for (;;) {
         VpUiSound sound;
