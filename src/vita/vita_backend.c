@@ -15,10 +15,15 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
 
 #define VP_STAGE_DIR "ux0:data/vitaplus/staging/latest"
 #define VP_COVER_SOURCE_LIMIT (8 * 1024 * 1024)
 #define VP_COVER_SOURCE_PATH "ux0:data/vitaplus/cache/covers/.source-image"
+/* Large libcurl and socket buffers keep the Vita's Wi-Fi link from stalling on big ROMs. */
+#define VP_TRANSFER_BUFFER_SIZE (512 * 1024)
+/* Progress callbacks are throttled so UI redraws do not slow the transfer down. */
+#define VP_TRANSFER_PROGRESS_INTERVAL_US (100 * 1000ULL)
 
 typedef struct {
     char *buffer;
@@ -41,6 +46,8 @@ typedef struct {
 typedef struct {
     VpTransferProgressFn callback;
     void *context;
+    uint64_t last_report_us;
+    bool reported;
 } TransferProgress;
 
 /* Transfers run on the single UI thread, so this avoids an oversized Vita stack frame. */
@@ -149,15 +156,33 @@ static size_t file_read(char *data, size_t size, size_t count, void *context) {
     return result > 0 ? (size_t)result : 0;
 }
 
+/* Best effort: a smaller kernel buffer still downloads, just more slowly. */
+static int transfer_socket_options(void *userdata, curl_socket_t fd, curlsocktype purpose) {
+    int receive_buffer = VP_TRANSFER_BUFFER_SIZE;
+    (void)userdata;
+    (void)purpose;
+    (void)setsockopt((int)fd, SOL_SOCKET, SO_RCVBUF, &receive_buffer,
+                     sizeof(receive_buffer));
+    return CURL_SOCKOPT_OK;
+}
+
 static int transfer_progress(void *context, curl_off_t total, curl_off_t downloaded,
                              curl_off_t upload_total, curl_off_t uploaded) {
     TransferProgress *progress = context;
+    uint64_t now;
     (void)upload_total;
     (void)uploaded;
     if (progress == NULL || progress->callback == NULL) return 0;
-    return progress->callback(downloaded > 0 ? (unsigned long long)downloaded : 0,
-                              total > 0 ? (unsigned long long)total : 0,
-                              progress->context) ? 1 : 0;
+    now = (uint64_t)sceKernelGetSystemTimeWide();
+    if (!progress->reported ||
+        now - progress->last_report_us >= VP_TRANSFER_PROGRESS_INTERVAL_US) {
+        progress->reported = true;
+        progress->last_report_us = now;
+        return progress->callback(downloaded > 0 ? (unsigned long long)downloaded : 0,
+                                  total > 0 ? (unsigned long long)total : 0,
+                                  progress->context) ? 1 : 0;
+    }
+    return 0;
 }
 
 static bool has_unsafe_path(const char *path) {
@@ -368,7 +393,7 @@ bool vp_vita_transfer_with_progress(const char *url, const char *bearer_token,
     bool installed = true;
     bool downloaded;
     char authorization[VP_TEXT + 32];
-    TransferProgress progress = {progress_callback, progress_context};
+    TransferProgress progress = {progress_callback, progress_context, 0, false};
     (void)context;
     if (url == NULL || destination == NULL || !valid_bearer_token(bearer_token) ||
         !make_parent_dirs(destination) || !vp_url_escape(url, transfer_url, sizeof(transfer_url)))
@@ -395,6 +420,8 @@ bool vp_vita_transfer_with_progress(const char *url, const char *bearer_token,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, file_write);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &file);
+    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, (long)VP_TRANSFER_BUFFER_SIZE);
+    curl_easy_setopt(curl, CURLOPT_SOCKOPTFUNCTION, transfer_socket_options);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION,
                      bearer_token != NULL && bearer_token[0] != '\0' ? 0L : 1L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
