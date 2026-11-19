@@ -196,14 +196,38 @@ bool vp_download_queue_cancel(VpDownloadQueue *queue, const char *item_id) {
     return true;
 }
 
+bool vp_download_queue_pause(VpDownloadQueue *queue, const char *item_id) {
+    VpDownloadEntry *entry = vp_download_queue_find(queue, item_id);
+    if (entry == NULL || entry->state != VP_DOWNLOAD_DOWNLOADING) return false;
+    entry->state = VP_DOWNLOAD_PAUSED;
+    entry->error[0] = '\0';
+    return true;
+}
+
 bool vp_download_queue_retry(VpDownloadQueue *queue, const char *item_id) {
     VpDownloadEntry *entry = vp_download_queue_find(queue, item_id);
     if (entry == NULL || (entry->state != VP_DOWNLOAD_FAILED &&
-                          entry->state != VP_DOWNLOAD_CANCELED)) return false;
+                          entry->state != VP_DOWNLOAD_CANCELED &&
+                          entry->state != VP_DOWNLOAD_PAUSED)) return false;
     entry->state = VP_DOWNLOAD_PENDING;
     entry->percent = 0;
     entry->error[0] = '\0';
     return true;
+}
+
+bool vp_download_queue_remove(VpDownloadQueue *queue, const char *item_id) {
+    size_t index;
+    size_t position;
+    if (queue == NULL || item_id == NULL) return false;
+    for (index = 0; index < queue->count; index++) {
+        if (strcmp(queue->entries[index].item.id, item_id) != 0) continue;
+        for (position = index; position + 1 < queue->count; position++)
+            queue->entries[position] = queue->entries[position + 1];
+        queue->count--;
+        memset(&queue->entries[queue->count], 0, sizeof(queue->entries[queue->count]));
+        return true;
+    }
+    return false;
 }
 
 VpItem *vp_catalog_add(VpCatalog *catalog, const VpItem *item) {

@@ -746,12 +746,24 @@ static void test_download_queue(void) {
 
     entry = vp_download_queue_start_next(&queue);
     assert(entry != NULL && strcmp(entry->item.id, "romm:queue-2") == 0);
+    vp_download_queue_progress(entry, 25, 100);
+    assert(entry->percent == 25);
+    assert(vp_download_queue_pause(&queue, "romm:queue-2"));
+    assert(entry->state == VP_DOWNLOAD_PAUSED && entry->percent == 25);
+    assert(vp_download_queue_retry(&queue, "romm:queue-2"));
+    assert(vp_download_queue_find(&queue, "romm:queue-2")->state == VP_DOWNLOAD_PENDING);
     vp_download_queue_finish(entry, false, "HTTP 500");
     assert(entry->state == VP_DOWNLOAD_FAILED);
     assert(vp_download_queue_retry(&queue, "romm:queue-2"));
     assert(vp_download_queue_find(&queue, "romm:queue-2")->state == VP_DOWNLOAD_PENDING);
     assert(vp_download_queue_cancel(&queue, "romm:queue-2"));
     assert(vp_download_queue_find(&queue, "romm:queue-2")->state == VP_DOWNLOAD_CANCELED);
+    assert(!vp_download_queue_pause(&queue, "romm:queue-2"));
+    assert(vp_download_queue_remove(&queue, "romm:queue-2"));
+    assert(queue.count == 1);
+    assert(vp_download_queue_find(&queue, "romm:queue-2") == NULL);
+    assert(strcmp(vp_download_queue_find(&queue, "romm:queue-1")->item.id, "romm:queue-1") == 0);
+    assert(!vp_download_queue_remove(&queue, "romm:queue-2"));
 }
 
 int main(void) {

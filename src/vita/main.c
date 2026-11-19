@@ -1,3 +1,4 @@
+#include <psp2/appmgr.h>
 #include <psp2/ctrl.h>
 #include <psp2/ime_dialog.h>
 #include <psp2/io/fcntl.h>
@@ -20,6 +21,15 @@
 #include "ui_presentation.h"
 #include "ui_renderer.h"
 #include "vita_thread_priority.h"
+
+/* vitasdk 2026.08 omits these from SceAppMgrSystemEventType. The ABI values are
+ * stable and are declared in newer vita-headers releases. */
+#ifndef SCE_APPMGR_SYSTEMEVENT_ON_DEACTIVATE
+#define SCE_APPMGR_SYSTEMEVENT_ON_DEACTIVATE ((int)0x10000002)
+#endif
+#ifndef SCE_APPMGR_SYSTEMEVENT_REQUEST_QUIT
+#define SCE_APPMGR_SYSTEMEVENT_REQUEST_QUIT ((int)0x20000001)
+#endif
 
 #define RGBA(r, g, b, a) ((unsigned int)((r) | ((g) << 8) | ((b) << 16) | ((a) << 24)))
 #define VP_CONFIG_PATH "ux0:data/vitaplus/config.ini"
@@ -74,6 +84,7 @@ typedef struct {
     size_t covers_completed;
     size_t covers_total;
     bool cancel_requested;
+    bool pause_requested;
     unsigned long romm_revision;
     VpRommConnectionState romm_state;
     bool token_exchanged;
@@ -416,6 +427,7 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
     background_job.covers_completed = 0;
     background_job.covers_total = 0;
     background_job.cancel_requested = false;
+    background_job.pause_requested = false;
     background_job.romm = romm_config;
     background_job.romm_revision = romm_connection.revision;
     background_job.romm_state = VP_ROMM_UNREACHABLE;
@@ -448,7 +460,7 @@ static bool download_progress(unsigned long long downloaded, unsigned long long 
     pthread_mutex_lock(&job->mutex);
     job->downloaded = downloaded;
     job->total = total;
-    canceled = job->cancel_requested;
+    canceled = job->cancel_requested || job->pause_requested;
     pthread_mutex_unlock(&job->mutex);
     return canceled;
 }
@@ -471,6 +483,37 @@ static bool start_next_download(void) {
     return false;
 }
 
+static bool pause_active_download(VpApp *app, bool exiting) {
+    char item_id[VP_TEXT];
+    bool active;
+    size_t index;
+
+    pthread_mutex_lock(&background_job.mutex);
+    active = background_job.active && background_job.kind == VP_JOB_DOWNLOAD_ROM;
+    if (active) {
+        (void)snprintf(item_id, sizeof(item_id), "%s", background_job.item.id);
+        background_job.pause_requested = true;
+        background_job.cancel_requested = false;
+    }
+    pthread_mutex_unlock(&background_job.mutex);
+    if (active) {
+        VpDownloadEntry *entry = vp_download_queue_find(&download_queue, item_id);
+        if (entry != NULL && entry->state == VP_DOWNLOAD_DOWNLOADING)
+            (void)vp_download_queue_pause(&download_queue, item_id);
+    } else {
+        for (index = 0; index < download_queue.count; index++) {
+            if (download_queue.entries[index].state != VP_DOWNLOAD_DOWNLOADING) continue;
+            (void)vp_download_queue_pause(&download_queue, download_queue.entries[index].item.id);
+            active = true;
+            break;
+        }
+    }
+    if (!active) return false;
+    (void)snprintf(app->notice, sizeof(app->notice), "%s",
+                   exiting ? "Descarga pausada al salir" : "Descarga pausada; X para reanudar");
+    return true;
+}
+
 static void background_job_poll(VpApp *app) {
     VpJobKind kind;
     VpItem item;
@@ -479,6 +522,7 @@ static void background_job_poll(VpApp *app) {
     char error[VP_TEXT];
     bool succeeded;
     bool canceled;
+    bool paused;
     size_t covers_completed;
     size_t covers_total;
     unsigned long romm_revision;
@@ -497,6 +541,7 @@ static void background_job_poll(VpApp *app) {
     (void)snprintf(destination, sizeof(destination), "%s", background_job.destination);
     (void)snprintf(error, sizeof(error), "%s", background_job.error);
     canceled = background_job.cancel_requested;
+    paused = background_job.pause_requested;
     covers_completed = background_job.covers_completed;
     covers_total = background_job.covers_total;
     romm_revision = background_job.romm_revision;
@@ -547,7 +592,9 @@ static void background_job_poll(VpApp *app) {
     } else if (kind == VP_JOB_DOWNLOAD_ROM) {
         VpDownloadEntry *entry = vp_download_queue_find(&download_queue, item.id);
         if (entry != NULL) {
-            if (canceled) {
+            if (paused && !succeeded) {
+                (void)vp_download_queue_pause(&download_queue, item.id);
+            } else if (canceled) {
                 entry->state = VP_DOWNLOAD_CANCELED;
                 entry->percent = 0;
                 entry->error[0] = '\0';
@@ -555,8 +602,13 @@ static void background_job_poll(VpApp *app) {
                 vp_download_queue_finish(entry, succeeded, error);
             }
         }
+        if (paused && !succeeded) {
+            (void)snprintf(app->notice, sizeof(app->notice), "Descarga pausada; X para reanudar");
+            return;
+        }
         if (!succeeded && canceled) {
-            (void)snprintf(app->notice, sizeof(app->notice), "Descarga cancelada");
+            if (entry != NULL)
+                (void)snprintf(app->notice, sizeof(app->notice), "Descarga cancelada");
             (void)start_next_download();
             return;
         }
@@ -606,6 +658,7 @@ static bool sync_cover_metadata(VpApp *app) {
     background_job.covers_completed = 0;
     background_job.covers_total = 0;
     background_job.cancel_requested = false;
+    background_job.pause_requested = false;
     background_job.romm = romm_config;
     background_job.homebrew = homebrew_config;
     background_job.catalog = app->catalog;
@@ -720,21 +773,46 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         }
         entry = &download_queue.entries[download_selection];
         if (pressed & SCE_CTRL_CROSS) {
-            if (entry->state == VP_DOWNLOAD_FAILED || entry->state == VP_DOWNLOAD_CANCELED) {
+            if (entry->state == VP_DOWNLOAD_FAILED || entry->state == VP_DOWNLOAD_CANCELED ||
+                entry->state == VP_DOWNLOAD_PAUSED) {
+                bool resumed = entry->state == VP_DOWNLOAD_PAUSED;
                 (void)vp_download_queue_retry(&download_queue, entry->item.id);
                 (void)start_next_download();
-                (void)snprintf(app->notice, sizeof(app->notice), "Reintentando %.110s", entry->item.title);
+                (void)snprintf(app->notice, sizeof(app->notice), "%s %.110s",
+                               resumed ? "Reanudando" : "Reintentando", entry->item.title);
             } else if (entry->state == VP_DOWNLOAD_PENDING || entry->state == VP_DOWNLOAD_DOWNLOADING) {
                 bool active = false;
                 (void)vp_download_queue_cancel(&download_queue, entry->item.id);
                 pthread_mutex_lock(&background_job.mutex);
                 active = background_job.active && background_job.kind == VP_JOB_DOWNLOAD_ROM &&
                          strcmp(background_job.item.id, entry->item.id) == 0;
-                if (active) background_job.cancel_requested = true;
+                if (active) {
+                    background_job.cancel_requested = true;
+                    background_job.pause_requested = false;
+                }
                 pthread_mutex_unlock(&background_job.mutex);
                 (void)snprintf(app->notice, sizeof(app->notice), active ? "Cancelando descarga" : "Descarga cancelada");
                 if (!active) (void)start_next_download();
             }
+        }
+        if (pressed & SCE_CTRL_SQUARE) {
+            char item_id[VP_TEXT];
+            bool active;
+            (void)snprintf(item_id, sizeof(item_id), "%s", entry->item.id);
+            pthread_mutex_lock(&background_job.mutex);
+            active = background_job.active && background_job.kind == VP_JOB_DOWNLOAD_ROM &&
+                     strcmp(background_job.item.id, item_id) == 0;
+            if (active) {
+                background_job.cancel_requested = true;
+                background_job.pause_requested = false;
+            }
+            pthread_mutex_unlock(&background_job.mutex);
+            (void)vp_download_queue_remove(&download_queue, item_id);
+            if (download_selection >= download_queue.count && download_queue.count > 0)
+                download_selection = download_queue.count - 1;
+            (void)snprintf(app->notice, sizeof(app->notice), "Descarga eliminada de la cola");
+            vp_ui_audio_play(VP_UI_SOUND_BACK);
+            if (!active) (void)start_next_download();
         }
         return;
     }
@@ -1385,12 +1463,43 @@ static unsigned int touch_tap_pressed(SceTouchData *touch, bool *active,
                                     *last_y * 544 / VP_TOUCH_HEIGHT);
 }
 
+static void handle_app_events(VpApp *app, bool *quit) {
+    SceAppMgrSystemEvent event;
+    while (sceAppMgrReceiveSystemEvent(&event) == 0) {
+        switch (event.systemEvent) {
+        case SCE_APPMGR_SYSTEMEVENT_ON_DEACTIVATE:
+            (void)pause_active_download(app, false);
+            break;
+        case SCE_APPMGR_SYSTEMEVENT_ON_RESUME: {
+            size_t index;
+            bool paused = false;
+            for (index = 0; index < download_queue.count; index++) {
+                if (download_queue.entries[index].state == VP_DOWNLOAD_PAUSED) {
+                    paused = true;
+                    break;
+                }
+            }
+            if (paused)
+                (void)snprintf(app->notice, sizeof(app->notice), "Descarga en pausa; X para reanudar");
+            break;
+        }
+        case SCE_APPMGR_SYSTEMEVENT_REQUEST_QUIT:
+            (void)pause_active_download(app, true);
+            *quit = true;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
 int main(void) {
     SceCtrlData pad;
     SceTouchData touch;
     unsigned int previous = 0;
     vita2d_pgf *font;
     bool curl_cleanup_allowed;
+    bool request_quit = false;
     bool rendered_once = false;
     bool touch_active = false;
     int touch_start_x = 0, touch_start_y = 0, touch_last_x = 0, touch_last_y = 0;
@@ -1431,6 +1540,8 @@ int main(void) {
                 continue;
             }
         }
+        handle_app_events(&app, &request_quit);
+        if (request_quit) break;
         background_job_poll(&app);
         if (romm_check_pending)
             (void)background_job_start(VP_JOB_VALIDATE_ROMM, NULL, NULL, NULL);
@@ -1441,7 +1552,10 @@ int main(void) {
         if (sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1) >= 0)
             pressed |= touch_tap_pressed(&touch, &touch_active, &touch_start_x, &touch_start_y,
                                          &touch_last_x, &touch_last_y);
-        if (pressed & SCE_CTRL_START) break;
+        if (pressed & SCE_CTRL_START) {
+            (void)pause_active_download(&app, true);
+            break;
+        }
         if (app.active_screen == VP_SCREEN_SETTINGS) {
             handle_settings_input(&app, pressed);
             if (!settings_ime_active && !settings_detail_active && (pressed & SCE_CTRL_LTRIGGER)) {

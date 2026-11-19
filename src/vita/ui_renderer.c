@@ -283,6 +283,7 @@ static const char *download_label(VpDownloadState state) {
         case VP_DOWNLOAD_COMPLETED:return "Completada";
         case VP_DOWNLOAD_FAILED:return "Fallida";
         case VP_DOWNLOAD_CANCELED:return "Cancelada";
+        case VP_DOWNLOAD_PAUSED:return "Pausada";
     }
     return "Desconocido";
 }
@@ -337,7 +338,7 @@ static void settings(const VpUiFrame *f) {
                 if (e->percent) round_rect(120,y+42,fmaxf(4,752*fminf((float)e->percent,100)/100),4,2,state);
             }
         }
-        label(f->font,64,430,832,.52f,muted,"X cancela pendiente/activa; X reintenta fallida/cancelada; Circulo vuelve");
+        label(f->font,64,430,832,.52f,muted,"X cancela/reintenta/reanuda; Cuadrado borra; Circulo vuelve");
         return;
     }
     {

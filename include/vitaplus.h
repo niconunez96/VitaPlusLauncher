@@ -73,7 +73,8 @@ typedef enum {
     VP_DOWNLOAD_DOWNLOADING,
     VP_DOWNLOAD_COMPLETED,
     VP_DOWNLOAD_FAILED,
-    VP_DOWNLOAD_CANCELED
+    VP_DOWNLOAD_CANCELED,
+    VP_DOWNLOAD_PAUSED
 } VpDownloadState;
 
 typedef struct {
@@ -240,7 +241,9 @@ void vp_download_queue_progress(VpDownloadEntry *entry,
                                 unsigned long long downloaded, unsigned long long total);
 void vp_download_queue_finish(VpDownloadEntry *entry, bool succeeded, const char *error);
 bool vp_download_queue_cancel(VpDownloadQueue *queue, const char *item_id);
+bool vp_download_queue_pause(VpDownloadQueue *queue, const char *item_id);
 bool vp_download_queue_retry(VpDownloadQueue *queue, const char *item_id);
+bool vp_download_queue_remove(VpDownloadQueue *queue, const char *item_id);
 
 bool vp_theme_load(VpTheme *theme, const char *ini_text);
 const char *vp_source_name(VpSource source);
