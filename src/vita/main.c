@@ -1473,8 +1473,11 @@ static unsigned int touch_tap_pressed(SceTouchData *touch, bool *active,
 }
 
 static void handle_app_events(VpApp *app, bool *quit) {
-    SceAppMgrSystemEvent event;
-    while (sceAppMgrReceiveSystemEvent(&event) == 0) {
+    /* Never let a non-draining event source starve input and rendering.
+     * Vita3K's unimplemented receiver can return success without an event. */
+    for (unsigned int polled = 0; polled < 16; polled++) {
+        SceAppMgrSystemEvent event = {0};
+        if (sceAppMgrReceiveSystemEvent(&event) != 0) return;
         switch (event.systemEvent) {
         case SCE_APPMGR_SYSTEMEVENT_ON_DEACTIVATE:
             (void)pause_active_download(app, false);
@@ -1495,9 +1498,9 @@ static void handle_app_events(VpApp *app, bool *quit) {
         case SCE_APPMGR_SYSTEMEVENT_REQUEST_QUIT:
             (void)pause_active_download(app, true);
             *quit = true;
-            break;
+            return;
         default:
-            break;
+            return;
         }
     }
 }
