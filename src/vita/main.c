@@ -948,6 +948,8 @@ static vita2d_texture *load_texture_file(const char *id, const char *path) {
         return NULL;
     }
     texture = vita2d_load_PNG_file(path);
+    if (texture != NULL)
+        vita2d_texture_set_filters(texture, SCE_GXM_TEXTURE_FILTER_LINEAR, SCE_GXM_TEXTURE_FILTER_LINEAR);
     record_cover_event(texture != NULL ? "load-ok" : "load-failed", id, path);
     return texture;
 }

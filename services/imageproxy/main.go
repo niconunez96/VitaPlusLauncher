@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/color"
 	"image/gif"
 	"image/jpeg"
 	"image/png"
@@ -14,6 +13,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+
+	"golang.org/x/image/draw"
 )
 
 const (
@@ -184,15 +185,10 @@ func centerCropAndScale(source image.Image, targetWidth, targetHeight int) *imag
 	}
 	startX := bounds.Min.X + (sourceWidth-cropWidth)/2
 	startY := bounds.Min.Y + (sourceHeight-cropHeight)/2
+	crop := image.Rect(startX, startY, startX+cropWidth, startY+cropHeight)
 
 	destination := image.NewNRGBA(image.Rect(0, 0, targetWidth, targetHeight))
-	for y := 0; y < targetHeight; y++ {
-		sourceY := startY + y*cropHeight/targetHeight
-		for x := 0; x < targetWidth; x++ {
-			sourceX := startX + x*cropWidth/targetWidth
-			destination.SetNRGBA(x, y, color.NRGBAModel.Convert(source.At(sourceX, sourceY)).(color.NRGBA))
-		}
-	}
+	draw.CatmullRom.Scale(destination, destination.Bounds(), source, crop, draw.Over, nil)
 	return destination
 }
 

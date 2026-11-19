@@ -100,12 +100,57 @@ func TestImageLogsSuccessfulProcessing(t *testing.T) {
 	}
 }
 
+func TestImageDownscaleUsesQualityResampling(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Config{})
+	request := httptest.NewRequest(http.MethodPost, "/image?width=100&height=100", sharpEdgePNG(t, 400, 200))
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	decoded, err := png.Decode(response.Body)
+	if err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// Center crop of 400x200 to 100x100 is x=[100,300), so a red/green edge at source x=200
+	// lands at output x=50. Nearest-neighbor keeps that boundary hard; a quality scaler blends it.
+	boundary := color.NRGBAModel.Convert(decoded.At(49, 50)).(color.NRGBA)
+	if boundary.G == 0 || boundary.R == 255 {
+		t.Fatalf("expected blended edge at (49,50), got RGBA(%d,%d,%d,%d)", boundary.R, boundary.G, boundary.B, boundary.A)
+	}
+}
+
 func sourcePNG(t *testing.T, width, height int) *bytes.Reader {
 	t.Helper()
 	source := image.NewRGBA(image.Rect(0, 0, width, height))
 	for x := 0; x < width; x++ {
 		for y := 0; y < height; y++ {
 			source.Set(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 100, A: 255})
+		}
+	}
+	var contents bytes.Buffer
+	err := png.Encode(&contents, source)
+	if err != nil {
+		t.Fatalf("encode source PNG: %v", err)
+	}
+	return bytes.NewReader(contents.Bytes())
+}
+
+func sharpEdgePNG(t *testing.T, width, height int) *bytes.Reader {
+	t.Helper()
+	source := image.NewRGBA(image.Rect(0, 0, width, height))
+	mid := width / 2
+	for x := 0; x < width; x++ {
+		for y := 0; y < height; y++ {
+			if x < mid {
+				source.Set(x, y, color.RGBA{R: 255, A: 255})
+			} else {
+				source.Set(x, y, color.RGBA{G: 255, A: 255})
+			}
 		}
 	}
 	var contents bytes.Buffer

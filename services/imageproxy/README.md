@@ -50,3 +50,7 @@ Content-Type: application/octet-stream
 The response is `image/png`, exactly `width × height`, with a center crop that preserves the source aspect ratio. PNG, JPEG, and GIF input are supported through Go's standard library. Output dimensions are limited to `1024×1024`; input bodies to `8 MiB`; and source dimensions to 16 megapixels.
 
 The caller downloads the source image and sends its raw bytes. This keeps the service independent from RomM authentication and prevents it from becoming an SSRF proxy.
+
+## Cache note
+
+Cover output is downscaled with a quality resampler and returned as PNG. After deploying a new version of this service, existing Vita-side processed covers (`ux0:data/vitaplus/cache/covers/processed-*.png`) keep the old pixels until you run **Sincronizar metadata** in Settings/RomM or clear the covers cache on the device.
