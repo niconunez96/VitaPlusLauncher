@@ -34,7 +34,7 @@ class VitaRenderLifecycleTests(unittest.TestCase):
         loop = body[body.index("for (;;) {") : body.index("\n    vp_ui_shutdown();")]
         calls = [
             "vita2d_wait_rendering_done();",
-            "prepare_shell(&frame, font, &app, pressed);",
+            "prepare_shell(&frame, font, &app);",
             "vita2d_start_drawing();",
             "vita2d_clear_screen();",
             "vp_ui_render(&frame);",
@@ -51,6 +51,17 @@ class VitaRenderLifecycleTests(unittest.TestCase):
         self.assertIn("covers_step(app, cover_indexes, cover_count);", body)
         for call in ("vita2d_start_drawing(", "vita2d_clear_screen(", "vp_ui_render("):
             self.assertNotIn(call, body)
+
+    def test_notifications_are_ephemeral_and_not_retriggered_by_navigation(self):
+        main = (ROOT / "src/vita/main.c").read_text()
+        renderer = (ROOT / "src/vita/ui_renderer.c").read_text()
+        header = (ROOT / "src/vita/ui_renderer.h").read_text()
+        self.assertNotIn("Biblioteca cargada desde cache", main)
+        self.assertNotIn("refresh_notice", header)
+        self.assertIn("notice_id", header)
+        self.assertIn("f->notice_id != last_notice_id", renderer)
+        self.assertIn("if (age < 4)", renderer)
+        self.assertIn("round_rect(636,64,296,54", renderer)
 
     def test_background_texture_is_resolved_after_slot_eviction(self):
         body = function_body("static void prepare_shell(")

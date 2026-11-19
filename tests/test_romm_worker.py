@@ -30,6 +30,7 @@ class RommWorkerTests(unittest.TestCase):
         prefix = r'''
 #include "vitaplus.h"
 #include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 enum {VP_JOB_VALIDATE_ROMM, VP_JOB_SYNC_PROVIDERS, VP_JOB_PAIR_AND_SYNC,
@@ -57,6 +58,11 @@ static bool vp_vita_exchange_pair_code(const char *u,const char *t,char *r,size_
 static bool save_catalog_cache(const VpCatalog *c,const VpRommConfig *r) {(void)c;(void)r;return true;}
 static bool save_romm_config(void) {saved=romm_config;saves++;return true;}
 static bool start_next_download(void) {return false;}
+static void show_notification(VpApp *app,const char *format, ...) {
+    va_list arguments; va_start(arguments,format);
+    vsnprintf(app->notice,sizeof(app->notice),format,arguments);
+    va_end(arguments); app->notice_id++;
+}
 '''
         run = r'''
 static void run(int kind, unsigned long revision) {
