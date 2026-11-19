@@ -32,7 +32,7 @@ Authorization: Bearer <token>
 
 La respuesta debe incluir un `id` y `name`/`title`. Si están presentes, VitaPlus conserva `platform_slug`, `platform_display_name`, `summary` (con `description` como respaldo), la carátula, `fs_name` y `download_url`; URLs relativas se convierten a absolutas contra `romm_url`. Para la carátula se prefiere `path_cover_small`, luego `path_cover_large`, luego `cover_url` y por último `url_cover`; RomM sirve esas rutas como PNG.
 
-RomM no siempre expone `download_url` en el objeto de la ROM. Cuando falta, VitaPlus usa `fs_name` y construye `GET /api/roms/{id}/content/{fs_name}`. Ese camino también define la extensión real del archivo descargado (`sfc`, `nds`, `zip`, …), que se conserva en `ux0:data/vitaplus/downloads/<source>_<id>.<ext>`. Si tampoco hay extensión disponible, se usa `.rom`. La descarga escribe primero en `<ruta>.part` y renombra al terminar, para que un corte de red no marque la ROM como descargada.
+RomM no siempre expone `download_url` en el objeto de la ROM. Cuando falta, VitaPlus usa `fs_name` y construye `GET /api/roms/{id}/content/{fs_name}`. Ese camino también define la extensión real del archivo descargado (`sfc`, `nds`, `zip`, …). El archivo se guarda en `ux0:data/vitaplus/downloads/<plataforma>/<nombre>_<id>.<ext>`, donde `<nombre>` se toma del título de la ROM en RomM formateado en minúsculas y sin espacios (con fallback al nombre de archivo), y `<id>` mantiene la descarga única. Si tampoco hay extensión disponible, se usa `.rom`. La descarga escribe primero en `<ruta>.part` y renombra al terminar, para que un corte de red no marque la ROM como descargada.
 
 La UI descarga con `X` y vuelve a comprobar el archivo al arrancar y después de cada sincronización; así el estado `Descargado` sobrevive a un catálogo nuevo. El token debe tener sólo permisos de lectura/descarga requeridos por el cliente. VitaPlus lo envía como `Authorization: Bearer` para páginas de catálogo y recursos RomM del mismo origen; nunca lo adjunta a URLs externas de artwork o descargas. El catálogo se pagina de a un ítem para respetar el buffer fijo del core (`VP_FETCH_RESPONSE_SIZE`, 256 KiB) y se detiene al llegar a `total` o `VP_MAX_ITEMS`. Un objeto RomM individual ronda los 17-30 KiB con metadatos, por lo que el buffer debe conservar holgura; si una respuesta lo desborda, el backend reporta `Respuesta demasiado grande` (y `truncated=1` en `network.log`) en lugar del confuso error de escritura de libcurl. Respuestas HTTP fuera de `2xx` hacen fallar el backend.
 
@@ -41,8 +41,8 @@ La UI descarga con `X` y vuelve a comprobar el archivo al arrancar y después de
 Una ROM descargada se abre con el emulador configurado para su plataforma. La UI construye una URI `psgm:play` y la entrega a `sceAppMgrLaunchAppByUri`:
 
 ```text
-psgm:play?titleid=RETROVITA&param=app0:/snes9x2005_libretro.self&param2=ux0:data/vitaplus/downloads/romm_42.sfc
-psgm:play?titleid=DSVITA000&param=ux0:data/vitaplus/downloads/romm_7.nds
+psgm:play?titleid=RETROVITA&param=app0:/snes9x2005_libretro.self&param2=ux0:data/vitaplus/downloads/snes/supermetroid_42.sfc
+psgm:play?titleid=DSVITA000&param=ux0:data/vitaplus/downloads/nds/metroid_7.nds
 ```
 
 El destino se define en `config.ini` con `launch_<platform>=<titleid>[:<core>]`. Si se omite el core, la URI manda sólo `param`; es el formato que usan emuladores que abren la ROM sin seleccionar un core de RetroArch. Las plataformas sin perfil muestran un aviso y no intentan lanzar nada.

@@ -401,6 +401,98 @@ static void vp_safe_component(const char *source, char *destination, size_t capa
     if (destination[0] == '\0') vp_copy(destination, capacity, "item");
 }
 
+static void vp_append_download_slug(const char *source, bool strip_extension,
+                                    char *destination, size_t capacity, size_t *used) {
+    size_t index;
+    size_t end;
+    if (source == NULL || destination == NULL || capacity == 0 || used == NULL) return;
+    end = strlen(source);
+    if (strip_extension) {
+        const char *name = source;
+        const char *dot = NULL;
+        const char *cursor;
+        for (cursor = source; *cursor != '\0'; cursor++) {
+            if (*cursor == '/' || *cursor == '\\') name = cursor + 1;
+        }
+        for (cursor = name; *cursor != '\0'; cursor++) {
+            if (*cursor == '.') dot = cursor;
+        }
+        if (dot != NULL && dot > name) end = (size_t)(dot - source);
+    }
+    for (index = 0; source[index] != '\0' && index < end && *used + 1 < capacity; index++) {
+        unsigned char value = (unsigned char)source[index];
+        if (isspace(value)) continue;
+        if (value >= 'A' && value <= 'Z') value = (unsigned char)(value - 'A' + 'a');
+        if (isalnum(value) || value == '-' || value == '_')
+            destination[(*used)++] = (char)value;
+    }
+}
+
+static void vp_append_download_id(const VpItem *item, char *destination,
+                                  size_t capacity, size_t *used) {
+    const char *source = NULL;
+    const char *cursor;
+    size_t index;
+    if (item == NULL || destination == NULL || capacity == 0 || used == NULL) return;
+    if (item->remote_id[0] != '\0') source = item->remote_id;
+    else if (item->id[0] != '\0') {
+        source = item->id;
+        cursor = strchr(item->id, ':');
+        if (cursor != NULL && cursor[1] != '\0') source = cursor + 1;
+    }
+    if (source != NULL) {
+        for (index = 0; source[index] != '\0' && *used + 1 < capacity; index++) {
+            unsigned char value = (unsigned char)source[index];
+            if (value >= 'A' && value <= 'Z') value = (unsigned char)(value - 'A' + 'a');
+            if (isalnum(value) || value == '-' || value == '_')
+                destination[(*used)++] = (char)value;
+        }
+    }
+    if (*used == 0) vp_append_download_slug("item", false, destination, capacity, used);
+}
+
+static void vp_item_download_basename(const VpItem *item, char *destination, size_t capacity) {
+    size_t used = 0;
+    size_t id_start;
+    size_t id_length;
+    char id_buffer[VP_TEXT];
+    size_t id_used = 0;
+    if (destination == NULL || capacity == 0) return;
+    destination[0] = '\0';
+    id_buffer[0] = '\0';
+    vp_append_download_id(item, id_buffer, sizeof(id_buffer), &id_used);
+    id_buffer[id_used] = '\0';
+    id_length = id_used;
+    if (item != NULL && item->title[0] != '\0')
+        vp_append_download_slug(item->title, false, destination, capacity, &used);
+    if (used == 0 && item != NULL && item->fs_name[0] != '\0')
+        vp_append_download_slug(item->fs_name, true, destination, capacity, &used);
+    if (used == 0 && item != NULL && item->remote_id[0] != '\0')
+        vp_append_download_slug(item->remote_id, false, destination, capacity, &used);
+    if (used == 0) {
+        vp_copy(destination, capacity, id_buffer[0] != '\0' ? id_buffer : "item");
+        return;
+    }
+    if (id_length == 0) {
+        destination[used] = '\0';
+        return;
+    }
+    if (used + 1 + id_length + 1 > capacity) {
+        size_t keep = capacity > (1 + id_length + 1) ? capacity - (1 + id_length + 1) : 0;
+        if (keep > used) keep = used;
+        used = keep;
+    }
+    id_start = used;
+    destination[used++] = '_';
+    {
+        size_t index;
+        for (index = 0; id_buffer[index] != '\0' && used + 1 < capacity; index++)
+            destination[used++] = id_buffer[index];
+    }
+    destination[used] = '\0';
+    (void)id_start;
+}
+
 static void vp_extension_from(const char *source, char *destination, size_t capacity) {
     const char *end;
     const char *cursor;
@@ -446,7 +538,7 @@ bool vp_item_extension(const VpItem *item, char *destination, size_t capacity) {
 
 bool vp_item_download_path(const VpItem *item, const char *directory,
                             char *destination, size_t capacity) {
-    char safe[VP_TEXT];
+    char basename[VP_TEXT];
     char platform[VP_TEXT];
     char extension[VP_DOWNLOAD_EXTENSION];
     size_t directory_length;
@@ -454,13 +546,13 @@ bool vp_item_download_path(const VpItem *item, const char *directory,
 
     if (item == NULL || item->id[0] == '\0' || directory == NULL || directory[0] == '\0' ||
         destination == NULL || capacity == 0) return false;
-    vp_safe_component(item->id, safe, sizeof(safe));
+    vp_item_download_basename(item, basename, sizeof(basename));
     vp_safe_component(item->platform, platform, sizeof(platform));
     if (!vp_item_extension(item, extension, sizeof(extension))) return false;
     directory_length = strlen(directory);
     while (directory_length > 0 && directory[directory_length - 1] == '/') directory_length--;
     written = snprintf(destination, capacity, "%.*s/%s/%s.%s", (int)directory_length, directory,
-                       platform, safe, extension);
+                       platform, basename, extension);
     return written > 0 && (size_t)written < capacity;
 }
 

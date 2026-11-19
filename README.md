@@ -109,7 +109,7 @@ Cada ROM de RomM muestra un ícono de descarga (flecha) o un check blanco cuando
 
 En **Ajustes → Descargas** se ve cada elemento con su estado y porcentaje. Con `X` cancelás una descarga pendiente o activa; sobre una descarga fallida, cancelada o pausada, `X` la vuelve a encolar (la pausada reinicia desde 0% porque el `.part` se descarta). Con `Cuadrado` la quitás de la cola. Bloquear la Vita o salir de la app pausa la descarga activa; al volver, `X` la reanuda. La cola admite hasta 16 ROMs y procesa una por vez para no bloquear la interfaz.
 
-El nombre del archivo conserva la extensión real que reporta RomM (`fs_name` o la URL de contenido): `sfc`, `nds`, `zip`, etc. La descarga usa `<archivo>.part` y renombra al final, así que un corte de red no deja una ROM marcada como lista. Las sincronizaciones, descargas e instalaciones se ejecutan en segundo plano; el estado se vuelve a comprobar al arrancar y después de sincronizar RomM.
+El archivo se guarda con el título de la ROM en RomM formateado en minúsculas y sin espacios, más su id para evitar colisiones (por ejemplo, `metroid_45.zip`), conservando la extensión real que reporta RomM (`fs_name` o la URL de contenido): `sfc`, `nds`, `zip`, etc. La descarga usa `<archivo>.part` y renombra al final, así que un corte de red no deja una ROM marcada como lista. Las sincronizaciones, descargas e instalaciones se ejecutan en segundo plano; el estado se vuelve a comprobar al arrancar y después de sincronizar RomM.
 
 Las ROMs que RomM marca con varios archivos (`has_multiple_files`, por ejemplo un disco PSX con `.cue` y `.bin`) no se descargan desde la UI: el endpoint devuelve un ZIP que el emulador no puede abrir directamente. Descargalas desde RomM, extraelas y agregá el `.cue`/`.m3u` como juego local.
 
