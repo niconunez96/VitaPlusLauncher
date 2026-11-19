@@ -19,6 +19,7 @@
 #include "ui_audio.h"
 #include "ui_presentation.h"
 #include "ui_renderer.h"
+#include "vita_thread_priority.h"
 
 #define RGBA(r, g, b, a) ((unsigned int)((r) | ((g) << 8) | ((b) << 16) | ((a) << 24)))
 #define VP_CONFIG_PATH "ux0:data/vitaplus/config.ini"
@@ -50,7 +51,6 @@ typedef enum {
     VP_JOB_VALIDATE_ROMM,
     VP_JOB_DOWNLOAD_ROM,
     VP_JOB_INSTALL_HOMEBREW,
-    VP_JOB_FETCH_COVER,
     VP_JOB_SYNC_COVERS
 } VpJobKind;
 
@@ -79,8 +79,8 @@ typedef struct {
     bool token_exchanged;
 } VpBackgroundJob;
 
-/* The core fetch buffer and backend diagnostics are deliberately single-owner. One worker keeps
- * all network/disk work off the UI thread without making those shared resources concurrent. */
+/* The core fetch buffer and backend diagnostics are deliberately single-owner. The background
+ * worker keeps network work off the UI thread; cover PNG decoding has its own worker. */
 static VpBackgroundJob background_job = {
     .mutex = PTHREAD_MUTEX_INITIALIZER
 };
@@ -93,7 +93,6 @@ static size_t visible_count_cache;
 static VpLibraryLevel cached_library_level;
 static char cached_platform[VP_TEXT];
 static bool catalog_view_cache_dirty = true;
-static char unavailable_cover_ids[VP_COVER_SLOTS][VP_TEXT];
 
 static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context);
 static void cover_path_for(const char *id, char *path, size_t capacity);
@@ -155,24 +154,6 @@ static bool load_catalog_cache(VpApp *app, const VpRommConfig *config) {
     app->catalog = cached_catalog;
     catalog_view_cache_dirty = true;
     return true;
-}
-
-static bool cover_is_unavailable(const char *id) {
-    size_t index;
-    for (index = 0; index < VP_COVER_SLOTS; index++) {
-        if (strcmp(unavailable_cover_ids[index], id) == 0) return true;
-    }
-    return false;
-}
-
-static void mark_cover_unavailable(const char *id) {
-    size_t index;
-    for (index = 0; index < VP_COVER_SLOTS; index++) {
-        if (unavailable_cover_ids[index][0] == '\0') {
-            (void)snprintf(unavailable_cover_ids[index], sizeof(unavailable_cover_ids[index]), "%s", id);
-            return;
-        }
-    }
 }
 
 static void trim(char *value) {
@@ -308,6 +289,7 @@ static bool fetch_romm_catalog(const char *url, const char *token, char *respons
 
 static void *background_job_run(void *context) {
     VpBackgroundJob *job = context;
+    vp_vita_thread_set_priority(VP_VITA_THREAD_PRIORITY_BACKGROUND);
     VpJobKind kind;
     VpRommConfig config;
     VpHomebrewConfig homebrew;
@@ -326,7 +308,7 @@ static void *background_job_run(void *context) {
     config = job->romm;
     homebrew = job->homebrew;
     /* The job owns this snapshot until the worker is joined. Keep the full
-     * catalog off the worker stack, including for single-cover jobs. */
+     * catalog off the worker stack, including during cover synchronization. */
     catalog = &job->catalog;
     item = job->item;
     (void)snprintf(destination, sizeof(destination), "%s", job->destination);
@@ -390,18 +372,14 @@ static void *background_job_run(void *context) {
         }
     } else {
         VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
-        VpCoverTransformBackend cover_backend = {vp_vita_transform_cover, NULL};
-        const char *target = kind == VP_JOB_DOWNLOAD_ROM || kind == VP_JOB_FETCH_COVER ? partial : destination;
+        const char *target = kind == VP_JOB_DOWNLOAD_ROM ? partial : destination;
         if (kind == VP_JOB_INSTALL_HOMEBREW)
             succeeded = vp_install_homebrew(&item, target, transfer_backend);
-        else if (kind == VP_JOB_FETCH_COVER)
-            succeeded = vp_cache_cover(&item, &config, target, cover_backend);
         else
             succeeded = vp_vita_transfer_with_progress(item.download_url, config.token, target,
                                                        VP_TRANSFER_DOWNLOAD, download_progress,
                                                        job, NULL);
-        if (succeeded && (kind == VP_JOB_DOWNLOAD_ROM || kind == VP_JOB_FETCH_COVER)) {
-            if (kind == VP_JOB_FETCH_COVER) (void)sceIoRemove(destination);
+        if (succeeded && kind == VP_JOB_DOWNLOAD_ROM) {
             succeeded = sceIoRename(partial, destination) >= 0;
             if (!succeeded) (void)sceIoRemove(partial);
         }
@@ -555,11 +533,6 @@ static void background_job_poll(VpApp *app) {
     }
 
     if (!succeeded && kind != VP_JOB_DOWNLOAD_ROM) {
-        if (kind == VP_JOB_FETCH_COVER) {
-            mark_cover_unavailable(item.id);
-            (void)start_next_download();
-            return;
-        }
         (void)snprintf(app->notice, sizeof(app->notice), "Operacion fallida: %.140s", error);
         (void)start_next_download();
         return;
@@ -954,37 +927,159 @@ static vita2d_texture *load_texture_file(const char *id, const char *path) {
     return texture;
 }
 
+/* PNG decoding is CPU work on Vita's single core. A dedicated decoder keeps it
+ * off the render/preparation thread; the one-slot handoff is owned by this
+ * thread, so only the main thread ever creates, frees or installs textures. */
+typedef struct {
+    pthread_t thread;
+    pthread_mutex_t mutex;
+    pthread_cond_t condition;
+    bool running;
+    bool request_pending;
+    bool result_ready;
+    char request_id[VP_TEXT];
+    char request_path[VP_PATH];
+    char result_id[VP_TEXT];
+    char result_path[VP_PATH];
+    vita2d_texture *result_texture;
+} VpCoverDecoder;
+
+static VpCoverDecoder cover_decoder = {
+    .mutex = PTHREAD_MUTEX_INITIALIZER,
+    .condition = PTHREAD_COND_INITIALIZER
+};
+
+static void *cover_decode_thread(void *context) {
+    VpCoverDecoder *decoder = context;
+    vp_vita_thread_set_priority(VP_VITA_THREAD_PRIORITY_BACKGROUND);
+    char id[VP_TEXT];
+    char path[VP_PATH];
+    for (;;) {
+        vita2d_texture *texture;
+        pthread_mutex_lock(&decoder->mutex);
+        while (decoder->running && !decoder->request_pending)
+            (void)pthread_cond_wait(&decoder->condition, &decoder->mutex);
+        if (!decoder->running) {
+            pthread_mutex_unlock(&decoder->mutex);
+            break;
+        }
+        (void)snprintf(id, sizeof(id), "%s", decoder->request_id);
+        (void)snprintf(path, sizeof(path), "%s", decoder->request_path);
+        decoder->request_pending = false;
+        pthread_mutex_unlock(&decoder->mutex);
+
+        texture = load_texture_file(id, path);
+
+        pthread_mutex_lock(&decoder->mutex);
+        if (decoder->result_ready && decoder->result_texture != NULL)
+            vita2d_free_texture(decoder->result_texture);
+        (void)snprintf(decoder->result_id, sizeof(decoder->result_id), "%s", id);
+        (void)snprintf(decoder->result_path, sizeof(decoder->result_path), "%s", path);
+        decoder->result_texture = texture;
+        decoder->result_ready = true;
+        pthread_mutex_unlock(&decoder->mutex);
+    }
+    return NULL;
+}
+
+static bool cover_decoder_init(void) {
+    int result;
+    pthread_mutex_lock(&cover_decoder.mutex);
+    if (cover_decoder.running) {
+        pthread_mutex_unlock(&cover_decoder.mutex);
+        return true;
+    }
+    cover_decoder.request_pending = false;
+    cover_decoder.result_ready = false;
+    cover_decoder.result_texture = NULL;
+    cover_decoder.running = true;
+    result = pthread_create(&cover_decoder.thread, NULL, cover_decode_thread, &cover_decoder);
+    if (result != 0) cover_decoder.running = false;
+    pthread_mutex_unlock(&cover_decoder.mutex);
+    return result == 0;
+}
+
+static void cover_decoder_shutdown(void) {
+    bool join = false;
+    pthread_mutex_lock(&cover_decoder.mutex);
+    if (cover_decoder.running) {
+        cover_decoder.running = false;
+        (void)pthread_cond_signal(&cover_decoder.condition);
+        join = true;
+    }
+    pthread_mutex_unlock(&cover_decoder.mutex);
+    if (join) (void)pthread_join(cover_decoder.thread, NULL);
+    pthread_mutex_lock(&cover_decoder.mutex);
+    if (cover_decoder.result_texture != NULL)
+        vita2d_free_texture(cover_decoder.result_texture);
+    cover_decoder.result_texture = NULL;
+    cover_decoder.result_ready = false;
+    cover_decoder.request_pending = false;
+    pthread_mutex_unlock(&cover_decoder.mutex);
+}
+
+static bool cover_decode_request(const char *id, const char *path) {
+    bool queued = false;
+    pthread_mutex_lock(&cover_decoder.mutex);
+    if (cover_decoder.running && !cover_decoder.request_pending && !cover_decoder.result_ready) {
+        (void)snprintf(cover_decoder.request_id, sizeof(cover_decoder.request_id), "%s", id);
+        (void)snprintf(cover_decoder.request_path, sizeof(cover_decoder.request_path), "%s", path);
+        cover_decoder.request_pending = true;
+        queued = true;
+        (void)pthread_cond_signal(&cover_decoder.condition);
+    }
+    pthread_mutex_unlock(&cover_decoder.mutex);
+    return queued;
+}
+
+static void cover_decode_collect(void) {
+    char id[VP_TEXT];
+    char path[VP_PATH];
+    vita2d_texture *texture;
+    VpCoverSlot *slot;
+    pthread_mutex_lock(&cover_decoder.mutex);
+    if (!cover_decoder.result_ready) {
+        pthread_mutex_unlock(&cover_decoder.mutex);
+        return;
+    }
+    (void)snprintf(id, sizeof(id), "%s", cover_decoder.result_id);
+    (void)snprintf(path, sizeof(path), "%s", cover_decoder.result_path);
+    texture = cover_decoder.result_texture;
+    cover_decoder.result_texture = NULL;
+    cover_decoder.result_ready = false;
+    pthread_mutex_unlock(&cover_decoder.mutex);
+
+    slot = find_cover_slot(id);
+    if (slot != NULL && slot->texture == NULL) {
+        slot->texture = texture;
+        slot->attempted = true;
+        return;
+    }
+    if (texture != NULL) vita2d_free_texture(texture);
+    else if (path[0] != '\0') (void)sceIoRemove(path);
+}
+
 static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
     size_t index;
+    cover_decode_collect();
     if (count > VP_COVER_SLOTS) count = VP_COVER_SLOTS;
     for (index = 0; index < count; index++) {
         const VpItem *item = &app->catalog.items[indexes[index]];
         VpCoverSlot *slot;
-        VpItem source_item;
         char path[VP_PATH];
-        char partial[VP_PATH + 8];
         SceUID cover_fd;
         if (item->cover_url[0] == '\0') continue;
-        if (cover_is_unavailable(item->id)) continue;
         if (find_cover_slot(item->id) != NULL) continue;
-        source_item = *item;
         cover_path_for(item->id, path, sizeof(path));
-        /* A cache miss is expected on the first render. Probe through Vita I/O
-         * without opening a stdio stream just to check for existence. */
+        /* Probe through Vita I/O without opening a stdio stream just to check
+         * for existence. Cached PNGs are decoded by the cover worker. */
         cover_fd = sceIoOpen(path, SCE_O_RDONLY, 0);
-        if (cover_fd >= 0) {
-            sceIoClose(cover_fd);
-            slot = acquire_slot(item->id, indexes, count);
-            if (slot == NULL) return;
-            slot->texture = load_texture_file(item->id, path);
-            if (slot->texture == NULL) (void)sceIoRemove(path);
-            slot->attempted = true;
-            return;
-        }
-        if (snprintf(partial, sizeof(partial), "%s.tmp", path) >= (int)sizeof(partial) ||
-            !background_job_start(VP_JOB_FETCH_COVER, &source_item, path, partial)) {
-            continue;
-        }
+        if (cover_fd < 0) continue;
+        sceIoClose(cover_fd);
+        if (!cover_decode_request(item->id, path)) continue;
+        slot = acquire_slot(item->id, indexes, count);
+        if (slot == NULL) return;
+        slot->attempted = true;
         return;
     }
 }
@@ -1304,7 +1399,7 @@ int main(void) {
     vp_launch_config_init(&launch_config);
     if (setenv("OPENSSL_CONF", "app0:openssl.cnf", 1) != 0) return 1;
     /* Initialize libcurl before creating any background worker. Letting the first
-     * cover-download thread initialize it lazily is unsafe on Vita's libcurl build. */
+     * network job initialize it lazily is unsafe on Vita's libcurl build. */
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return 1;
     (void)sceIoMkdir("ux0:data", 0777);
     (void)sceIoMkdir("ux0:data/vitaplus", 0777);
@@ -1320,6 +1415,7 @@ int main(void) {
     vita2d_init();
     font = vita2d_load_default_pgf();
     if (font == NULL) return 1;
+    (void)cover_decoder_init();
     (void)vp_ui_audio_init();
     (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
@@ -1429,6 +1525,7 @@ int main(void) {
     }
     vp_ui_shutdown();
     vp_ui_audio_shutdown();
+    cover_decoder_shutdown();
     {
         size_t index;
         for (index = 0; index < VP_COVER_SLOTS; index++)

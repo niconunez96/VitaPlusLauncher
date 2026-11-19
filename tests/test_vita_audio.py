@@ -53,7 +53,8 @@ class VitaAudioTests(unittest.TestCase):
         audio = (ROOT / "src" / "vita" / "ui_audio.c").read_text()
         self.assertRegex(
             audio,
-            r"_Alignas\(64\)\s+static\s+int16_t\s+samples\s*\[VP_UI_AUDIO_BUFFER_SAMPLES\]",
+            r"_Alignas\(64\)\s+static\s+int16_t\s+samples\s*\[VP_UI_AUDIO_BUFFER_COUNT\]"
+            r"\[VP_UI_AUDIO_BUFFER_SAMPLES\]",
         )
 
     def test_volume_sets_both_channels_even_for_a_mono_port(self):
@@ -61,13 +62,22 @@ class VitaAudioTests(unittest.TestCase):
         self.assertRegex(audio, r"int\s+volumes\[2\]\s*=\s*\{\s*volume\s*,\s*volume\s*\}")
         self.assertIn("SCE_AUDIO_VOLUME_FLAG_L_CH | SCE_AUDIO_VOLUME_FLAG_R_CH", audio)
 
-    def test_output_buffer_is_drained_before_reuse(self):
+    def test_output_buffers_rotate_and_drain_only_on_wrap(self):
         audio = (ROOT / "src" / "vita" / "ui_audio.c").read_text()
-        sent = "sceAudioOutOutput(port, samples)"
-        drained = "sceAudioOutOutput(port, NULL)"
+        self.assertIn("#define VP_UI_AUDIO_BUFFER_COUNT 4", audio)
+        read = "fread(samples[index]"
+        sent = "sceAudioOutOutput(port, samples[index])"
+        advance = "index = (index + 1) % VP_UI_AUDIO_BUFFER_COUNT"
+        drained = "if (index == 0 && sceAudioOutOutput(port, NULL) < 0)"
+        self.assertIn(read, audio)
         self.assertIn(sent, audio)
+        self.assertIn(advance, audio)
         self.assertIn(drained, audio)
-        self.assertLess(audio.index(sent), audio.index(drained))
+        self.assertLess(audio.index(read), audio.index(sent))
+        self.assertLess(audio.index(sent), audio.index(advance))
+        self.assertLess(audio.index(advance), audio.index(drained))
+        self.assertNotIn("sceAudioOutOutput(port, samples)", audio)
+        self.assertEqual(audio.count("sceAudioOutOutput(port, NULL)"), 2)
 
 
 if __name__ == "__main__":

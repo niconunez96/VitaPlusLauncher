@@ -16,6 +16,7 @@ test-vita-lifecycle:
 	python3 tests/test_vita_render_lifecycle.py
 	python3 tests/test_vita_audio.py
 	python3 tests/test_vita_download_tuning.py
+	python3 tests/test_vita_thread_priority.py
 	python3 tests/test_romm_worker.py
 
 build/test_presentation: src/vita/ui_presentation.c src/vita/ui_presentation.h tests/test_presentation.c

@@ -73,6 +73,26 @@ class VitaRenderLifecycleTests(unittest.TestCase):
         self.assertIn("64 * 1024", log)
         self.assertNotIn("cover_url", log)
 
+    def test_cover_decoding_runs_on_a_dedicated_worker(self):
+        step = function_body("static void covers_step(")
+        self.assertIn("cover_decode_collect();", step)
+        self.assertIn("cover_decode_request(item->id, path)", step)
+        self.assertNotIn("vita2d_load_PNG_file", step)
+        worker = function_body("static void *cover_decode_thread(")
+        self.assertIn("load_texture_file(id, path)", worker)
+        init = function_body("static bool cover_decoder_init(")
+        self.assertIn("pthread_create", init)
+        main_body = function_body("int main(void)")
+        self.assertIn("cover_decoder_init();", main_body)
+        self.assertIn("cover_decoder_shutdown();", main_body)
+
+    def test_manual_cover_sync_is_the_only_fetch_path(self):
+        self.assertNotIn("VP_JOB_FETCH_COVER", SOURCE)
+        self.assertIn("VP_JOB_SYNC_COVERS", SOURCE)
+        self.assertIn("static bool sync_cover_metadata(", SOURCE)
+        step = function_body("static void covers_step(")
+        self.assertNotIn("background_job_start", step)
+
 
 if __name__ == "__main__":
     unittest.main()

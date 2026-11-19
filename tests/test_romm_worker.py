@@ -33,7 +33,7 @@ class RommWorkerTests(unittest.TestCase):
 #include <stdio.h>
 #include <string.h>
 enum {VP_JOB_VALIDATE_ROMM, VP_JOB_SYNC_PROVIDERS, VP_JOB_PAIR_AND_SYNC,
-      VP_JOB_SYNC_COVERS, VP_JOB_DOWNLOAD_ROM, VP_JOB_FETCH_COVER};
+      VP_JOB_SYNC_COVERS, VP_JOB_DOWNLOAD_ROM};
 typedef struct {VpCatalog catalog; VpRommConnectionState romm_state; bool token_exchanged;} Job;
 static Job storage;
 static VpRommConfig romm_config, saved;
@@ -57,7 +57,6 @@ static bool vp_vita_exchange_pair_code(const char *u,const char *t,char *r,size_
 static bool save_catalog_cache(const VpCatalog *c,const VpRommConfig *r) {(void)c;(void)r;return true;}
 static bool save_romm_config(void) {saved=romm_config;saves++;return true;}
 static bool start_next_download(void) {return false;}
-static void mark_cover_unavailable(const char *id) {(void)id;}
 '''
         run = r'''
 static void run(int kind, unsigned long revision) {
@@ -71,7 +70,6 @@ static void run(int kind, unsigned long revision) {
         finish = r'''
 finish:;
     VpApp *app=&application;
-    VpItem item={0};
     unsigned long romm_revision=revision;
     VpRommConnectionState romm_state=job->romm_state;
     bool token_exchanged=job->token_exchanged;

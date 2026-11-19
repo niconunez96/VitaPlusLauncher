@@ -7,9 +7,11 @@
 #include <string.h>
 
 #include "ui_audio.h"
+#include "vita_thread_priority.h"
 
 #define VP_UI_AUDIO_SAMPLE_RATE 48000
 #define VP_UI_AUDIO_BUFFER_SAMPLES 1024
+#define VP_UI_AUDIO_BUFFER_COUNT 4
 
 typedef struct {
     const char *path;
@@ -24,21 +26,22 @@ typedef struct {
     VpUiSound sound;
 } VpUiAudioPlayer;
 
-/* UI sounds are serialized on a dedicated thread because each output buffer is
- * drained before the next one is submitted. Keeping only the newest pending cue
- * prevents rapid directional input from accumulating stale navigation clicks. */
+/* UI sounds are serialized on a dedicated thread. Keeping only the newest
+ * pending cue prevents rapid directional input from accumulating stale
+ * navigation clicks. */
 static VpUiAudioPlayer player = {
     .mutex = PTHREAD_MUTEX_INITIALIZER,
     .condition = PTHREAD_COND_INITIALIZER
 };
 
-/* sceAudioOutOutput DMAs directly from this buffer: its start address and size
- * must both be 64-byte aligned, otherwise the audio is corrupted on hardware.
- * A stack array has no such guarantee, and a static one also keeps it off the
- * small Vita thread stack. Buffer size is 1024 frames * 2 bytes = 2048 bytes.
- * The port only blocks until the buffer is accepted, so play_sound drains it
- * before the next read overwrites it. Only the audio thread calls play_sound. */
-_Alignas(64) static int16_t samples[VP_UI_AUDIO_BUFFER_SAMPLES];
+/* sceAudioOutOutput DMAs directly from these buffers: each start address and
+ * size must be 64-byte aligned, otherwise the audio is corrupted on hardware.
+ * A stack array has no such guarantee, and a static one also keeps them off the
+ * small Vita thread stack. Each buffer is 1024 frames * 2 bytes = 2048 bytes.
+ * The port only blocks until a buffer is accepted, so the player keeps a ring
+ * of buffers ahead of the device and drains it before reusing the oldest one.
+ * Only the audio thread calls play_sound. */
+_Alignas(64) static int16_t samples[VP_UI_AUDIO_BUFFER_COUNT][VP_UI_AUDIO_BUFFER_SAMPLES];
 
 static const VpUiAudioAsset assets[] = {
     [VP_UI_SOUND_NAVIGATION] = {"app0:assets/audio/01-navegacion-alternativa.wav"},
@@ -88,6 +91,7 @@ static bool seek_pcm_data(FILE *file) {
 
 static void play_sound(int port, VpUiSound sound) {
     FILE *file;
+    size_t index = 0;
     if ((unsigned int)sound >= sizeof(assets) / sizeof(assets[0])) return;
     file = fopen(assets[sound].path, "rb");
     if (file == NULL || !seek_pcm_data(file)) {
@@ -95,21 +99,25 @@ static void play_sound(int port, VpUiSound sound) {
         return;
     }
     for (;;) {
-        size_t count = fread(samples, sizeof(samples[0]), VP_UI_AUDIO_BUFFER_SAMPLES, file);
+        size_t count = fread(samples[index], sizeof(samples[index][0]), VP_UI_AUDIO_BUFFER_SAMPLES, file);
         if (count == 0) break;
         if (count < VP_UI_AUDIO_BUFFER_SAMPLES)
-            memset(samples + count, 0, (VP_UI_AUDIO_BUFFER_SAMPLES - count) * sizeof(samples[0]));
-        if (sceAudioOutOutput(port, samples) < 0) break;
-        /* The call above only waits for the buffer to be accepted. NULL waits
-         * until the queued audio has finished, so the shared buffer is safe to
-         * refill on the next iteration. */
-        if (sceAudioOutOutput(port, NULL) < 0) break;
+            memset(samples[index] + count, 0,
+                   (VP_UI_AUDIO_BUFFER_SAMPLES - count) * sizeof(samples[index][0]));
+        if (sceAudioOutOutput(port, samples[index]) < 0) break;
+        index = (index + 1) % VP_UI_AUDIO_BUFFER_COUNT;
+        /* Drain only when the ring wraps. That wait overlaps with playback, and
+         * the following fread happens while the device is still consuming the
+         * other queued buffers instead of after a silent port. */
+        if (index == 0 && sceAudioOutOutput(port, NULL) < 0) break;
     }
+    if (index != 0) (void)sceAudioOutOutput(port, NULL);
     fclose(file);
 }
 
 static void *audio_thread(void *context) {
     VpUiAudioPlayer *audio = context;
+    vp_vita_thread_set_priority(VP_VITA_THREAD_PRIORITY_AUDIO);
     int port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_MAIN, VP_UI_AUDIO_BUFFER_SAMPLES,
                                    VP_UI_AUDIO_SAMPLE_RATE, SCE_AUDIO_OUT_MODE_MONO);
     if (port >= 0) {
