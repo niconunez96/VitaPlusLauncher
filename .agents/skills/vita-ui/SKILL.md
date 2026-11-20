@@ -10,3 +10,4 @@ description: Use when changing Vita rendering, controls, touch behavior, or targ
 - Keep geometry and touch hitboxes aligned, then cover boundaries with host tests.
 - Avoid large automatic buffers in Vita paths; target stacks are constrained.
 - After target-only changes, build a fresh VPK and inspect the artifact when assets or runtime files changed.
+- For every user-visible UI change, capture the modified state from the real Vita3K framebuffer after building the current VPK; inspect it visually and attach the verified PNG in the user-facing review. Keep run evidence outside the repository unless documentation assets are explicitly requested.
