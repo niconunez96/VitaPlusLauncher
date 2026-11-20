@@ -353,6 +353,13 @@ static void empty(const VpUiFrame *f,const char *symbol,const char *title,const 
     vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,210,358,540,2,ink,message);
 }
 
+static void settings_empty(const VpUiFrame *f,const char *symbol,const char *title,const char *message) {
+    VpUiRect r=vp_ui_settings_content_card();
+    glass(r,false,false); icon(symbol,r.x+(r.w-64)/2,r.y+21,64);
+    text(f,VP_TYPE_HERO_TITLE,r.x+30,r.y+131,r.w-60,ink,title);
+    vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,r.x+30,r.y+168,r.w-60,2,ink,message);
+}
+
 static void settings(const VpUiFrame *f) {
     static const char *names[]={"General","Interfaz","Descargas","Conexión (RomM)","Almacenamiento","Acerca de"};
     static const char *icons[]={"ui_general","ui_interface","ui_download","ui_romm","ui_storage","ui_info"};
@@ -372,7 +379,7 @@ static void settings(const VpUiFrame *f) {
     }
     if (section==2) {
         size_t start=(f->download_selection/4)*4,j;
-        if (!f->downloads->count) { empty(f,"ui_download","Todo al día","Agrega un juego desde la biblioteca para descargarlo."); return; }
+        if (!f->downloads->count) { settings_empty(f,"ui_download","Todo al día","Agrega un juego desde la biblioteca para descargarlo."); return; }
         for (j=start;j<f->downloads->count && j<start+4;j++) {
             const VpDownloadEntry *e=&f->downloads->entries[j]; VpUiRect r={310,120+(int)(j-start)*76,600,68};
             char status[64]; glass(r,j==f->download_selection,false);
@@ -416,7 +423,7 @@ static void settings(const VpUiFrame *f) {
         return;
     }
     {
-        VpUiRect r={310,148,600,270}; char detail[384]; glass(r,false,false);
+        VpUiRect r=vp_ui_settings_content_card(); char detail[384]; glass(r,false,false);
         icon(icons[section],334,168,48);
         text(f,VP_TYPE_HERO_TITLE,400,203,470,ink,names[section]);
         if (section==1) {

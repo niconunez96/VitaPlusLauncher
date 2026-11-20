@@ -116,7 +116,7 @@ int vita2d_font_text_width(vita2d_font *font,unsigned int size,const char *s) {
 }
 int vita2d_font_draw_text(vita2d_font *font,int x,int y,unsigned int color,unsigned int size,const char *s) {
     int width=vita2d_font_text_width(font,size,s);
-    assert(size>=14 && size<=30);
+    assert(size>=16 && size<=30);
     if (!(x>=0 && y>=0 && x+width<=960 && y<=544)) {
         fprintf(stderr,"Text overflow x=%d y=%d width=%d: %s\n",x,y,width,s); abort();
     }
@@ -145,7 +145,7 @@ int main(int argc,char **argv) {
     const char *slugs[]={"arcade","dreamcast","gba","nds","gamecube","psx","psp","3ds","ps2","snes","genesis","wii"};
     const char *titles[]={"Bloody Roar II","Castlevania: Symphony of the Night","Crash Bandicoot","Gran Turismo","Metal Gear Solid",
         "Resident Evil","Silent Hill","Dino Crisis","Tomb Raider","Ridge Racer","A game with a very long title and accents: aventura fantástica","Another game"};
-    const char *cases[]={"platforms","carousel","list","grid","settings","general","interface","downloads","romm","storage","about","store","empty","last-page"};
+    const char *cases[]={"platforms","carousel","list","grid","settings","general","interface","downloads","downloads-empty","romm","storage","about","store","empty","last-page"};
     size_t c,i;
     cr=cairo_create(canvas); assert(!FT_Init_FreeType(&freetype)); assert(vp_ui_fonts_load(&typefaces));
     assert(vp_ui_backdrop_init());
@@ -189,12 +189,13 @@ int main(int argc,char **argv) {
     }
     for (c=0;c<sizeof(cases)/sizeof(cases[0]);c++) {
         app.active_screen=VP_SCREEN_LIBRARY; app.library_level=VP_LEVEL_PLATFORMS; app.selected_platform=5; app.selected_item=0;
-        frame.group_count=12; frame.visible_count=12; frame.settings_detail=false;
+        frame.group_count=12; frame.visible_count=12; frame.settings_detail=false; queue.count=6;
         if (c>=1 && c<=3) { app.library_level=VP_LEVEL_ROMS; app.active_view=c==1?VP_VIEW_CAROUSEL:(c==2?VP_VIEW_LIST:VP_VIEW_GRID); }
-        if (c>=4 && c<=10) { app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=c!=4; frame.settings_section=c==4?0:(int)c-5; }
-        if (c==11) app.active_screen=VP_SCREEN_STORES;
-        if (c==12) frame.group_count=0;
-        if (c==13) { app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_GRID; app.selected_item=11; }
+        if (c>=4 && c<=11) { app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=c!=4; frame.settings_section=c==4?0:(int)c-5-(c>=8?1:0); }
+        if (c==8) queue.count=0;
+        if (c==12) app.active_screen=VP_SCREEN_STORES;
+        if (c==13) frame.group_count=0;
+        if (c==14) { app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_GRID; app.selected_item=11; }
         (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
         frame.romm_state=VP_ROMM_CONNECTED;
         for (i=0;i<10;i++) frame.covers[i]=covers[i];
