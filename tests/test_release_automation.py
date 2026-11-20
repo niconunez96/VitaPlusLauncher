@@ -67,10 +67,34 @@ class CommitMsgHookTests(unittest.TestCase):
             self.assertIn("invalid commit message", rejected.stderr)
 
 
+class PullRequestTitleValidationTests(unittest.TestCase):
+    def test_validator_accepts_release_intent_titles_and_rejects_invalid_ones(self) -> None:
+        validator = ROOT / "scripts" / "validate_pr_title.py"
+
+        accepted = subprocess.run(
+            [str(validator), "--title", "MINOR(ui): add carousel"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(0, accepted.returncode, accepted.stderr)
+
+        rejected = subprocess.run(
+            [str(validator), "--title", "add carousel"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("invalid pull request title", rejected.stderr)
+
+
 class WorkflowContractTests(unittest.TestCase):
     def test_ci_workflow_gates_release_and_uploads_the_vpk(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("pull_request:", workflow)
+        self.assertIn("name: Validate pull request title", workflow)
+        self.assertIn("python3 scripts/validate_pr_title.py \"$PR_TITLE\"", workflow)
         self.assertIn("make test", workflow)
         self.assertIn("./scripts/build-vpk.sh --clean", workflow)
         self.assertIn("needs: [validate, host-tests, build-vpk]", workflow)
