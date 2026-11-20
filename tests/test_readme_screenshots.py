@@ -9,6 +9,9 @@ README = (ROOT / "README.md").read_text()
 SCREENSHOTS = (
     "docs/images/vitashelf-home.png",
     "docs/images/vitashelf-romm-connection.png",
+    "docs/images/vitashelf-roms-grid.png",
+    "docs/images/vitashelf-roms-list.png",
+    "docs/images/vitashelf-roms-carousel.png",
 )
 
 

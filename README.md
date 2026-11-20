@@ -12,6 +12,22 @@ Capturas reales de la app ejecutándose en Vita3K. La primera muestra una biblio
 
 ![Biblioteca de VitaShelf Launcher sincronizada desde RomM](docs/images/vitashelf-home.png)
 
+### Vistas de ROMs / ROM views
+
+La Biblioteca ofrece tres maneras de explorar cada plataforma: grilla, lista con detalle y carrusel. / The Library offers three ways to browse each platform: grid, detailed list, and carousel.
+
+#### Grilla / Grid
+
+![Vista de grilla de ROMs de VitaShelf Launcher](docs/images/vitashelf-roms-grid.png)
+
+#### Lista / List
+
+![Vista de lista de ROMs de VitaShelf Launcher](docs/images/vitashelf-roms-list.png)
+
+#### Carrusel / Carousel
+
+![Vista de carrusel de ROMs de VitaShelf Launcher](docs/images/vitashelf-roms-carousel.png)
+
 ### Conexión (RomM) / Connection (RomM)
 
 ![Pantalla de conexión a RomM de VitaShelf Launcher](docs/images/vitashelf-romm-connection.png)
