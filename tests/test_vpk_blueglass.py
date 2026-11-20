@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class BlueglassPackageTests(unittest.TestCase):
     def test_runtime_resources_match_sources_and_sources_are_not_shipped(self):
-        with zipfile.ZipFile(ROOT / "dist/vitaplus.vpk") as package:
+        with zipfile.ZipFile(ROOT / "dist/vitashelflauncher.vpk") as package:
             self.assertIsNone(package.testzip())
             names=set(package.namelist())
             for folder in ("logos","backgrounds","ui","fonts"):
@@ -22,6 +22,9 @@ class BlueglassPackageTests(unittest.TestCase):
             self.assertIn("assets/licenses/Carbon-README.txt",names)
             self.assertIn("assets/licenses/RomM-AGPL-3.0.txt",names)
             self.assertIn("assets/licenses/romm-isotipo.svg",names)
+            param_sfo = package.read("sce_sys/param.sfo")
+            self.assertIn(b"VitaShelf Launcher", param_sfo)
+            self.assertIn(b"VSHELF001", param_sfo)
 
 
 if __name__ == "__main__":

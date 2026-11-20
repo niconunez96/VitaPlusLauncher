@@ -1,4 +1,4 @@
-#include "vitaplus.h"
+#include "vitashelflauncher.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -717,7 +717,7 @@ void vp_app_init(VpApp *app) {
     memset(app, 0, sizeof(*app));
     vp_catalog_init(&app->catalog);
     vp_copy(app->theme.id, sizeof(app->theme.id), "default");
-    vp_copy(app->theme.name, sizeof(app->theme.name), "VitaPlus Default");
+    vp_copy(app->theme.name, sizeof(app->theme.name), "VitaShelf Launcher Default");
     vp_copy(app->theme.background, sizeof(app->theme.background), "#11141c");
     vp_copy(app->theme.surface, sizeof(app->theme.surface), "#202938");
     vp_copy(app->theme.accent, sizeof(app->theme.accent), "#5bc0be");

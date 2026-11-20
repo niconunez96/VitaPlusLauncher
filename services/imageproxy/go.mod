@@ -1,4 +1,4 @@
-module github.com/vitaplus/imageproxy
+module github.com/vitashelflauncher/imageproxy
 
 go 1.26.0
 

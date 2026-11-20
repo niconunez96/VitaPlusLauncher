@@ -1,14 +1,14 @@
 # Blueglass UI: native layout, assets and verification
 
-Blueglass implements the supplied VitaPlus renders on the native 960 × 544 canvas:
+Blueglass implements the supplied VitaShelf Launcher renders on the native 960 × 544 canvas:
 a console ribbon, seven-position game carousel, five-row list with detail panel,
 and 5 × 2 cover mosaic. Inter and shared geometry drive both drawing and touch targets.
 
 ## Update an existing installation
 
-1. Install the rebuilt `dist/vitaplus.vpk`.
+1. Install the rebuilt `dist/vitashelflauncher.vpk`.
 2. Redeploy `services/imageproxy` to enable `mode=contain` for complete covers.
-3. In VitaPlus, use **Ajustes → Conexión (RomM) → Sincronizar ahora**, followed by
+3. In VitaShelf Launcher, use **Ajustes → Conexión (RomM) → Sincronizar ahora**, followed by
    **Sincronizar metadata** to cache full covers and available game screenshots.
 
 Existing `processed-*.png` covers remain visible until replacement `fit-v2-*.png`

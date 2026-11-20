@@ -30,7 +30,7 @@ LOGOS = {
 
 
 def fetch(url):
-    request = urllib.request.Request(url, headers={"User-Agent": "VitaPlus-asset-preparation"})
+    request = urllib.request.Request(url, headers={"User-Agent": "VitaShelf Launcher-asset-preparation"})
     with urllib.request.urlopen(request, timeout=60) as response:
         return response.read()
 

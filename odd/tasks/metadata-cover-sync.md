@@ -13,7 +13,7 @@ Branch: `feat/metadata-cover-sync`. Delivery: one reviewable work unit; host tes
 
 - T1 — S1-S3 — inline — completed — Mapped the serialized worker, cache naming, slot eviction, and test seams; evidence: `make test` and VPK build.
 - T2 — S1-S3 — inline — completed — Implemented the bulk cover job, Settings control, status UI, and temporary-file cache promotion; commit pending.
-- T3 — S1-S3 — inline — completed — `make test` passed and `scripts/build-vpk.sh` produced `dist/vitaplus.vpk` (SHA-256 `58ff152be707a2d876566405f5b9f892dab54c9bd30b8a35139e09cc0da1537e`); commit pending.
+- T3 — S1-S3 — inline — completed — `make test` passed and `scripts/build-vpk.sh` produced `dist/vitashelflauncher.vpk` (SHA-256 `58ff152be707a2d876566405f5b9f892dab54c9bd30b8a35139e09cc0da1537e`); commit pending.
 
 ## Log
 

@@ -1,5 +1,5 @@
-#ifndef VITAPLUS_H
-#define VITAPLUS_H
+#ifndef VITASHELF_LAUNCHER_H
+#define VITASHELF_LAUNCHER_H
 
 #include <stdbool.h>
 #include <stddef.h>

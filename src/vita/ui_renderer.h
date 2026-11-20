@@ -1,7 +1,7 @@
 #ifndef VP_UI_RENDERER_H
 #define VP_UI_RENDERER_H
 #include <vita2d.h>
-#include "vitaplus.h"
+#include "vitashelflauncher.h"
 #include "ui_text.h"
 #include "ui_presentation.h"
 

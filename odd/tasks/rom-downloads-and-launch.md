@@ -20,7 +20,7 @@ Acceptance: Pressing X on an installed ROM builds `psgm:play?titleid=<titleid>&p
 Check: `vp_build_launch_uri` host tests; Vita build.
 
 S4. Downloaded state survives a RomM resync and app restart.
-Acceptance: After synchronization the UI checks the computed download path on `ux0:data/vitaplus/downloads/`; existing files mark the ROM as installed and set `launch_target`. Incomplete downloads are written to `<path>.part` and renamed only on success.
+Acceptance: After synchronization the UI checks the computed download path on `ux0:data/vitashelflauncher/downloads/`; existing files mark the ROM as installed and set `launch_target`. Incomplete downloads are written to `<path>.part` and renamed only on success.
 Check: Vita build; manual restart check.
 
 S5. Emulator mapping is configurable without recompiling.
@@ -47,7 +47,7 @@ La idea es que una vez descargadas estas roms puedan ser ejecutadas por un emula
 L2 (2026-11-17): Plan accepted inline. Assumption: launch profiles are configured per platform so NDS/PSP can use DSVita/Adrenaline-style title IDs instead of hardcoding RetroArch for every console.
 
 L3 (2026-11-17): RomM `SimpleRomSchema` has no `download_url` field, so S2 synthesizes `/api/roms/{id}/content/{fs_name}`. Verified against demo `openapi.json`.
-L4 (2026-11-17): Core RED observed as compile errors, then `make test` GREEN; Vita build produced `dist/vitaplus.vpk`.
+L4 (2026-11-17): Core RED observed as compile errors, then `make test` GREEN; Vita build produced `dist/vitashelflauncher.vpk`.
 L5 (2026-11-17): Added `multi_file` parsing for `has_multiple_files`; the UI explains that RomM returns a multi-file ZIP and suggests extracting it as a local `.cue`/`.m3u` game. Download failures now surface the curl/HTTP detail. Installed homebrew is marked `Instalado`.
 L6 (2026-11-17): Final verification: `make test` PASS; `./scripts/build-vpk.sh --clean` PASS; VPK sha256 `83cc286c9e8bf240501f0ced1d8a0c597e4a1c438cf5fb415adcc48cb4813d73`.
 L7 (2026-11-17): Vita3K diagnosis: the generic fallback to `url` matched nested LaunchBox image metadata, so ROM `86` tried to download a JPEG instead of its RomM content. RomM URLs are now always synthesized from `id` + `fs_name`; duplicate `.part` cleanup was removed. Regression test, `make test`, and clean VPK build PASS; VPK sha256 `d8df58feb198a908eff633e69ab44ffa0a8a9054e92ba72b4cd524ee709fde67`.

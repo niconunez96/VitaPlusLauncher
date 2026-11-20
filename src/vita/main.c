@@ -21,7 +21,7 @@
 #include <string.h>
 
 #include "vita_backend.h"
-#include "vitaplus.h"
+#include "vitashelflauncher.h"
 #include "ui_audio.h"
 #include "ui_presentation.h"
 #include "ui_renderer.h"
@@ -39,9 +39,9 @@
 #endif
 
 #define RGBA(r, g, b, a) ((unsigned int)((r) | ((g) << 8) | ((b) << 16) | ((a) << 24)))
-#define VP_CONFIG_PATH "ux0:data/vitaplus/config.ini"
-#define VP_CATALOG_CACHE_PATH "ux0:data/vitaplus/catalog.cache"
-#define VP_CATALOG_CACHE_PARTIAL "ux0:data/vitaplus/catalog.cache.part"
+#define VP_CONFIG_PATH "ux0:data/vitashelflauncher/config.ini"
+#define VP_CATALOG_CACHE_PATH "ux0:data/vitashelflauncher/catalog.cache"
+#define VP_CATALOG_CACHE_PARTIAL "ux0:data/vitashelflauncher/catalog.cache.part"
 #define VP_CATALOG_CACHE_VERSION 2U
 #define VP_TOUCH_WIDTH 1920
 #define VP_TOUCH_HEIGHT 1088
@@ -144,7 +144,7 @@ static bool save_catalog_cache(const VpCatalog *catalog, const VpRommConfig *con
     bool written;
     if (catalog == NULL || config == NULL || catalog->count > VP_MAX_ITEMS) return false;
     (void)sceIoMkdir("ux0:data", 0777);
-    (void)sceIoMkdir("ux0:data/vitaplus", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
     file = fopen(VP_CATALOG_CACHE_PARTIAL, "wb");
     if (file == NULL) return false;
     written = fwrite(magic, 1, sizeof(magic), file) == sizeof(magic) &&
@@ -234,7 +234,7 @@ static void load_providers(VpApp *app) {
     fclose(file);
     if (strcmp(active_theme, "default") != 0) {
         char path[VP_PATH];
-        (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/themes/%s/theme.ini", active_theme);
+        (void)snprintf(path, sizeof(path), "ux0:data/vitashelflauncher/themes/%s/theme.ini", active_theme);
         load_theme_file(app, path);
     }
 }
@@ -243,7 +243,7 @@ static bool save_romm_config(void) {
     FILE *file;
     size_t index;
     (void)sceIoMkdir("ux0:data", 0777);
-    (void)sceIoMkdir("ux0:data/vitaplus", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
     file = fopen(VP_CONFIG_PATH, "w");
     if (file == NULL) return false;
     (void)fprintf(file, "romm_url=%s\nromm_token=%s\nimage_proxy_url=%s\nhomebrew_catalog=%s\nactive_theme=%s\n",
@@ -272,7 +272,7 @@ static void refresh_downloaded_items(VpApp *app) {
         char path[VP_PATH];
         if (item->source != VP_SOURCE_ROMM) continue;
         if (item->multi_file ||
-            !vp_item_download_path(item, "ux0:data/vitaplus/downloads", path, sizeof(path)) ||
+            !vp_item_download_path(item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)) ||
             !file_exists(path)) {
             item->installed = false;
             item->launch_target[0] = '\0';
@@ -932,17 +932,17 @@ static void safe_id(const char *id, char *destination, size_t capacity) {
 static void cover_path_for(const char *id, char *path, size_t capacity) {
     char safe[VP_TEXT];
     safe_id(id, safe, sizeof(safe));
-    (void)snprintf(path, capacity, "ux0:data/vitaplus/cache/covers/fit-v2-%s.png", safe);
+    (void)snprintf(path, capacity, "ux0:data/vitashelflauncher/cache/covers/fit-v2-%s.png", safe);
 }
 
 static void artwork_path_for(const char *id,char *path,size_t capacity) {
     char safe[VP_TEXT];
     safe_id(id,safe,sizeof(safe));
-    (void)snprintf(path,capacity,"ux0:data/vitaplus/cache/covers/art-v1-%s.png",safe);
+    (void)snprintf(path,capacity,"ux0:data/vitashelflauncher/cache/covers/art-v1-%s.png",safe);
 }
 
 static void record_cover_event(const char *event, const char *id, const char *path) {
-    const char *log_path = "ux0:data/vitaplus/covers.log";
+    const char *log_path = "ux0:data/vitashelflauncher/covers.log";
     SceIoStat info;
     FILE *log;
     /* Bound diagnostics and close each event so it survives a later decoder/GPU fault.
@@ -1188,7 +1188,7 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
         if (cover_fd<0) {
             char safe[VP_TEXT];
             safe_id(item->id,safe,sizeof(safe));
-            (void)snprintf(path,sizeof(path),"ux0:data/vitaplus/cache/covers/processed-%s.png",safe);
+            (void)snprintf(path,sizeof(path),"ux0:data/vitashelflauncher/cache/covers/processed-%s.png",safe);
             cover_fd=sceIoOpen(path,SCE_O_RDONLY,0);
         }
         if (cover_fd < 0) continue;
@@ -1242,7 +1242,7 @@ static void activate_selected(VpApp *app) {
             show_notification(app, "Presiona X otra vez para instalar %.150s", item->title);
             return;
         }
-        (void)snprintf(path, sizeof(path), "ux0:data/vitaplus/downloads/%s.vpk", destination);
+        (void)snprintf(path, sizeof(path), "ux0:data/vitashelflauncher/downloads/%s.vpk", destination);
         if (background_job_start(VP_JOB_INSTALL_HOMEBREW, item, path, NULL))
             show_notification(app, "Instalacion iniciada: %.110s", item->title);
         else
@@ -1286,7 +1286,7 @@ static void activate_selected(VpApp *app) {
                            "RomM no expuso un archivo descargable para esta ROM");
             return;
         }
-        if (!vp_item_download_path(item, "ux0:data/vitaplus/downloads", path, sizeof(path))) {
+        if (!vp_item_download_path(item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path))) {
             (void)snprintf(app->notice, sizeof(app->notice), "No se pudo preparar el nombre de descarga");
             return;
         }
@@ -1600,10 +1600,10 @@ int main(void) {
      * network job initialize it lazily is unsafe on Vita's libcurl build. */
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return 1;
     (void)sceIoMkdir("ux0:data", 0777);
-    (void)sceIoMkdir("ux0:data/vitaplus", 0777);
-    (void)sceIoMkdir("ux0:data/vitaplus/cache", 0777);
-    (void)sceIoMkdir("ux0:data/vitaplus/cache/covers", 0777);
-    (void)sceIoMkdir("ux0:data/vitaplus/downloads", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher/cache", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher/cache/covers", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher/downloads", 0777);
     load_providers(&app);
     request_romm_check();
     (void)load_catalog_cache(&app, &romm_config);

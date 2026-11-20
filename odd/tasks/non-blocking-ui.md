@@ -1,6 +1,6 @@
 # Feature: non-blocking-ui
 
-Objective: keep VitaPlus navigation responsive while remote work runs in the background, and store downloaded RomM ROMs under their platform.
+Objective: keep VitaShelf Launcher navigation responsive while remote work runs in the background, and store downloaded RomM ROMs under their platform.
 Branch: feat/non-blocking-ui; delivery strategy: ask-on-risk; test runner: `make test` and `./scripts/build-vpk.sh --clean`.
 
 ## Specs
@@ -22,7 +22,7 @@ Acceptance: RomM download and install transfers run in the background; users can
 Check: manual Vita download while moving between screens and platform lists.
 
 S5. "tratemos de agrupar los roms descargados por plataforma y no simplemente la romm en \"downloads\""
-Acceptance: each downloaded RomM file is saved beneath `ux0:data/vitaplus/downloads/<safe-platform>/`, and existing downloaded-state detection uses that same path.
+Acceptance: each downloaded RomM file is saved beneath `ux0:data/vitashelflauncher/downloads/<safe-platform>/`, and existing downloaded-state detection uses that same path.
 Check: core download-path tests and manual Vita download verification.
 
 S6. "siempre deberiamos priorizar la navegabilidad de la UI sin bloquearla todo el trabajo se deberia mover al segundo plano"
@@ -38,7 +38,7 @@ Check: code review against foreground call paths plus manual hardware smoke test
 
 ## Log
 
-L1 (user, 2026-11-17): "Estuve probando vitaplus en una vita real y hay algo en general que creo que deberiamos modificar, la app en general se \"bloquea\" mucho, pareciera como que se pone a hacer algo y se queda estatica. Por ej:
+L1 (user, 2026-11-17): "Estuve probando vitashelflauncher en una vita real y hay algo en general que creo que deberiamos modificar, la app en general se \"bloquea\" mucho, pareciera como que se pone a hacer algo y se queda estatica. Por ej:
 1. Mientras se sincroniza la biblioteca de romm se queda bloqueado
 2. Cuando entro a una consola por ej \"snes\" se queda bloqueado por un par de segundos
 3. Cuando empiezo a descargar un romm se queda bloqueado sin poder navegar

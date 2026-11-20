@@ -13,7 +13,7 @@
   artwork retains its upstream CC BY-NC-SA terms. Original SVGs and source console
   images are retained under `sources/`; exact revisions and URLs are in `provenance.json`.
 - **Wallpaper and generated hardware backgrounds**: original FLUX 3 Image generations
-  for VitaPlus. Durable generation IDs are recorded in `generations.json`; temporary
+  for VitaShelf Launcher. Durable generation IDs are recorded in `generations.json`; temporary
   signed URLs are deliberately excluded. Moderated submissions were not retried;
   their platform backgrounds use attributed source hardware on the FLUX wallpaper.
 - **RomM settings icon**: the previously accepted circular PNG from
@@ -24,7 +24,7 @@
   The original SVG and upstream GNU Affero General Public License v3 are retained
   in `sources/` and bundled under `assets/licenses/`. This does not change the
   licensing of unrelated artwork or imply trademark endorsement.
-- **UI symbols, focus texture and VitaPlus emblem**: original vector/geometry artwork
+- **UI symbols, focus texture and VitaShelf Launcher emblem**: original vector/geometry artwork
   built by `scripts/prepare-blueglass.py`. Controller button symbols are original
   vector recreations of the classic DualShock dark buttons and colored outlines,
   not official Sony assets. They are prerendered into one 128×128 atlas with four

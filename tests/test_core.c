@@ -1,4 +1,4 @@
-#include "vitaplus.h"
+#include "vitashelflauncher.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -355,10 +355,10 @@ static void test_download_paths(void) {
 
     assert(vp_item_extension(&item, extension, sizeof(extension)));
     assert(strcmp(extension, "sfc") == 0);
-    assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
-    assert(strcmp(path, "ux0:data/vitaplus/downloads/snes/supermetroidusa_42.sfc") == 0);
-    assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads/", path, sizeof(path)));
-    assert(strcmp(path, "ux0:data/vitaplus/downloads/snes/supermetroidusa_42.sfc") == 0);
+    assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/snes/supermetroidusa_42.sfc") == 0);
+    assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads/", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/snes/supermetroidusa_42.sfc") == 0);
 
     /* RomM does not always expose fs_name; the content URL still carries the extension. */
     item.fs_name[0] = '\0';
@@ -366,27 +366,27 @@ static void test_download_paths(void) {
                    "https://romm.local/api/roms/42/content/game.zip?token=1");
     assert(vp_item_extension(&item, extension, sizeof(extension)));
     assert(strcmp(extension, "zip") == 0);
-    assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
-    assert(strcmp(path, "ux0:data/vitaplus/downloads/snes/supermetroidusa_42.zip") == 0);
+    assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/snes/supermetroidusa_42.zip") == 0);
 
     (void)snprintf(item.platform, sizeof(item.platform), "%s", "Mega Drive / Genesis");
-    assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
-    assert(strcmp(path, "ux0:data/vitaplus/downloads/Mega_Drive___Genesis/supermetroidusa_42.zip") == 0);
+    assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/Mega_Drive___Genesis/supermetroidusa_42.zip") == 0);
 
     (void)snprintf(item.download_url, sizeof(item.download_url), "%s",
                    "https://romm.local/api/roms/42/content/7");
     assert(vp_item_extension(&item, extension, sizeof(extension)));
     assert(strcmp(extension, "rom") == 0);
 
-    assert(!vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, 8));
+    assert(!vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, 8));
 
     /* Fallback to fs_name stem when title is unavailable. */
     item.title[0] = '\0';
     item.download_url[0] = '\0';
     (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "Donkey Kong Country (USA).sfc");
     (void)snprintf(item.platform, sizeof(item.platform), "%s", "snes");
-    assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
-    assert(strcmp(path, "ux0:data/vitaplus/downloads/snes/donkeykongcountryusa_42.sfc") == 0);
+    assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/snes/donkeykongcountryusa_42.sfc") == 0);
 
     /* Different IDs keep same-title ROMs unique. */
     (void)snprintf(item.title, sizeof(item.title), "%s", "Metroid");
@@ -395,8 +395,8 @@ static void test_download_paths(void) {
                    "https://romm.local/api/roms/45/content/game.zip");
     (void)snprintf(item.id, sizeof(item.id), "%s", "romm:45");
     (void)snprintf(item.remote_id, sizeof(item.remote_id), "%s", "45");
-    assert(vp_item_download_path(&item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
-    assert(strcmp(path, "ux0:data/vitaplus/downloads/snes/metroid_45.zip") == 0);
+    assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/snes/metroid_45.zip") == 0);
 }
 
 static void test_launch_profiles(void) {
@@ -409,25 +409,25 @@ static void test_launch_profiles(void) {
     assert(profile != NULL);
     assert(strcmp(profile->titleid, "RETROVITA") == 0);
     assert(strcmp(profile->core, "app0:/snes9x2005_libretro.self") == 0);
-    assert(vp_build_launch_uri(profile, "ux0:data/vitaplus/downloads/snes/supermetroid_42.sfc",
+    assert(vp_build_launch_uri(profile, "ux0:data/vitashelflauncher/downloads/snes/supermetroid_42.sfc",
                                uri, sizeof(uri)));
     assert(strcmp(uri, "psgm:play?titleid=RETROVITA&param=app0:/snes9x2005_libretro.self"
-                       "&param2=ux0:data/vitaplus/downloads/snes/supermetroid_42.sfc") == 0);
+                       "&param2=ux0:data/vitashelflauncher/downloads/snes/supermetroid_42.sfc") == 0);
 
     assert(vp_launch_config_set(&config, "nds", "DSVITA000:"));
     profile = vp_launch_config_find(&config, "nds");
     assert(profile != NULL);
     assert(strcmp(profile->titleid, "DSVITA000") == 0);
     assert(profile->core[0] == '\0');
-    assert(vp_build_launch_uri(profile, "ux0:data/vitaplus/downloads/nds/metroid_7.nds",
+    assert(vp_build_launch_uri(profile, "ux0:data/vitashelflauncher/downloads/nds/metroid_7.nds",
                                uri, sizeof(uri)));
-    assert(strcmp(uri, "psgm:play?titleid=DSVITA000&param=ux0:data/vitaplus/downloads/nds/metroid_7.nds") == 0);
+    assert(strcmp(uri, "psgm:play?titleid=DSVITA000&param=ux0:data/vitashelflauncher/downloads/nds/metroid_7.nds") == 0);
 
     assert(vp_launch_config_set(&config, "PSP", "VSCU00001:"));
     assert(vp_launch_config_find(&config, "psp") != NULL);
     assert(vp_launch_config_find(&config, "unknown-platform") == NULL);
     assert(!vp_launch_config_set(&config, "snes", ""));
-    assert(!vp_build_launch_uri(profile, "ux0:data/vitaplus/downloads/nds/metroid_7.nds", uri, 16));
+    assert(!vp_build_launch_uri(profile, "ux0:data/vitashelflauncher/downloads/nds/metroid_7.nds", uri, 16));
 }
 
 static void test_romm_content_download(void) {
@@ -459,13 +459,13 @@ static void test_romm_content_download(void) {
     assert(strcmp(item->fs_name, "Super Metroid (USA).sfc") == 0);
     assert(strcmp(item->download_url,
                   "http://romm.local/api/roms/42/content/Super Metroid (USA).sfc") == 0);
-    assert(vp_item_download_path(item, "ux0:data/vitaplus/downloads", path, sizeof(path)));
-    assert(strcmp(path, "ux0:data/vitaplus/downloads/snes/supermetroid_42.sfc") == 0);
+    assert(vp_item_download_path(item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/snes/supermetroid_42.sfc") == 0);
     assert(vp_queue_download(item, &config, path, transfer_backend));
     assert(strcmp(transfer_log.url,
                   "http://romm.local/api/roms/42/content/Super Metroid (USA).sfc") == 0);
     assert(strcmp(transfer_log.destination,
-                   "ux0:data/vitaplus/downloads/snes/supermetroid_42.sfc") == 0);
+                   "ux0:data/vitashelflauncher/downloads/snes/supermetroid_42.sfc") == 0);
     assert(strcmp(transfer_log.bearer, "rmm_test_token") == 0);
     assert(!item->multi_file);
 
@@ -598,22 +598,22 @@ static void test_romm_sync(void) {
     item = vp_catalog_find(&catalog, "romm:99");
     assert(item != NULL);
     assert(strcmp(item->cover_url, "http://romm.local/assets/fzero.png") == 0);
-    assert(vp_cache_cover(item, &config, "ux0:data/vitaplus/cache/fzero.png", cover_transform_backend));
+    assert(vp_cache_cover(item, &config, "ux0:data/vitashelflauncher/cache/fzero.png", cover_transform_backend));
     assert(cover_transform_log.calls == 1);
     assert(strcmp(cover_transform_log.source_url, "http://romm.local/assets/fzero.png") == 0);
     assert(strcmp(cover_transform_log.bearer, "rmm_test_token") == 0);
     assert(strcmp(cover_transform_log.service_url, "http://romm.local/image") == 0);
-    assert(vp_queue_download(item, &config, "ux0:data/vitaplus/downloads/fzero.sfc", transfer_backend));
+    assert(vp_queue_download(item, &config, "ux0:data/vitashelflauncher/downloads/fzero.sfc", transfer_backend));
     assert(transfer_log.calls == 1);
     assert(strcmp(transfer_log.url, "http://romm.local/api/file/fzero.sfc") == 0);
     assert(strcmp(transfer_log.bearer, "rmm_test_token") == 0);
     (void)snprintf(item->cover_url, sizeof(item->cover_url), "https://cdn.example/fzero.png");
     (void)snprintf(config.image_proxy_url, sizeof(config.image_proxy_url), "http://romm.local:8090/image");
-    assert(vp_cache_cover(item, &config, "ux0:data/vitaplus/cache/fzero.png", cover_transform_backend));
+    assert(vp_cache_cover(item, &config, "ux0:data/vitashelflauncher/cache/fzero.png", cover_transform_backend));
     assert(strcmp(cover_transform_log.bearer, "") == 0);
     assert(strcmp(cover_transform_log.service_url, "http://romm.local:8090/image") == 0);
     (void)snprintf(item->download_url, sizeof(item->download_url), "https://cdn.example/fzero.sfc");
-    assert(vp_queue_download(item, &config, "ux0:data/vitaplus/downloads/fzero.sfc", transfer_backend));
+    assert(vp_queue_download(item, &config, "ux0:data/vitashelflauncher/downloads/fzero.sfc", transfer_backend));
     assert(strcmp(transfer_log.bearer, "") == 0);
 }
 
@@ -725,8 +725,8 @@ static void test_providers_and_transfers(void) {
     const char *romm = "{\"items\":[{\"id\":42,\"name\":\"Super Metroid\","
                        "\"platform_slug\":\"snes\",\"url_cover\":\"http://romm/cover.png\","
                        "\"download_url\":\"http://romm/game.sfc\"}]}";
-    const char *store = "[{\"id\":\"vitaplus\",\"name\":\"VitaPlus\","
-                        "\"description\":\"Custom shell\",\"url\":\"https://example.org/vitaplus.vpk\"}]";
+    const char *store = "[{\"id\":\"vitashelflauncher\",\"name\":\"VitaShelf Launcher\","
+                        "\"description\":\"Custom shell\",\"url\":\"https://example.org/vitashelflauncher.vpk\"}]";
 
     memset(&log, 0, sizeof(log));
     backend.execute = fake_transfer;
@@ -736,15 +736,15 @@ static void test_providers_and_transfers(void) {
     assert(vp_homebrew_import(&catalog, store));
     assert(catalog.count == 2);
     rom = vp_catalog_find(&catalog, "romm:42");
-    homebrew = vp_catalog_find(&catalog, "homebrew:vitaplus");
+    homebrew = vp_catalog_find(&catalog, "homebrew:vitashelflauncher");
     assert(rom != NULL && homebrew != NULL);
     assert(strcmp(rom->platform, "snes") == 0);
-    assert(vp_queue_download(rom, NULL, "ux0:data/vitaplus/downloads/snes/game.sfc", backend));
+    assert(vp_queue_download(rom, NULL, "ux0:data/vitashelflauncher/downloads/snes/game.sfc", backend));
     assert(log.calls == 1 && log.last_action == VP_TRANSFER_DOWNLOAD);
     assert(log.bearer[0] == '\0');
-    assert(vp_install_homebrew(homebrew, "ux0:data/vitaplus/downloads/VitaPlus.vpk", backend));
+    assert(vp_install_homebrew(homebrew, "ux0:data/vitashelflauncher/downloads/VitaShelf Launcher.vpk", backend));
     assert(log.calls == 2 && log.last_action == VP_TRANSFER_INSTALL_VPK);
-    assert(!vp_install_homebrew(rom, "ux0:data/vitaplus/x", backend));
+    assert(!vp_install_homebrew(rom, "ux0:data/vitashelflauncher/x", backend));
 }
 
 static void test_download_queue(void) {
@@ -829,6 +829,6 @@ int main(void) {
     test_homebrew_store_sync();
     test_providers_and_transfers();
     test_download_queue();
-    puts("vitaplus core tests: PASS");
+    puts("vitashelflauncher core tests: PASS");
     return 0;
 }

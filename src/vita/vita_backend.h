@@ -1,7 +1,7 @@
-#ifndef VITAPLUS_VITA_BACKEND_H
-#define VITAPLUS_VITA_BACKEND_H
+#ifndef VITASHELF_LAUNCHER_VITA_BACKEND_H
+#define VITASHELF_LAUNCHER_VITA_BACKEND_H
 
-#include "vitaplus.h"
+#include "vitashelflauncher.h"
 
 typedef bool (*VpTransferProgressFn)(unsigned long long downloaded, unsigned long long total,
                                      void *context);

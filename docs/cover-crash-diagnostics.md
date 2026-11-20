@@ -12,7 +12,7 @@ not establish the cause of every image-specific crash.
 2. Open Arcade and wait at least 30 seconds without navigating.
 3. Navigate through several pages, leave Arcade, and re-enter. Repeat with a
    catalog that previously worked.
-4. If the app closes, copy `ux0:data/vitaplus/covers.log` before reproducing again,
+4. If the app closes, copy `ux0:data/vitashelflauncher/covers.log` before reproducing again,
    along with the error screen or crash dump if available.
 
 ## Read the log
@@ -33,7 +33,7 @@ individually; the log restarts once it reaches approximately 64 KiB.
 
 A final `load-start` without a matching result is a candidate for investigation,
 not proof that the named image is corrupt. Network failures are recorded
-separately in `ux0:data/vitaplus/network.log`.
+separately in `ux0:data/vitashelflauncher/network.log`.
 
 ## Local checks
 

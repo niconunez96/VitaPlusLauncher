@@ -28,7 +28,7 @@ class RommWorkerTests(unittest.TestCase):
             start = source.index("static bool fetch_romm_catalog(")
             adapter = source[start:source.index("\n}", start) + 2]
         prefix = r'''
-#include "vitaplus.h"
+#include "vitashelflauncher.h"
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -115,13 +115,13 @@ int main(void) {
     return 0;
 }
 '''
-        with tempfile.TemporaryDirectory(prefix="vitaplus-romm-") as directory:
+        with tempfile.TemporaryDirectory(prefix="vitashelflauncher-romm-") as directory:
             probe = Path(directory) / "probe.c"
             binary = Path(directory) / "probe"
             probe.write_text(prefix + adapter + run + worker + finish + poll + cases)
             subprocess.run(shlex.split(os.environ.get("CC", "cc")) + [
                 "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
-                "-I" + str(ROOT / "include"), str(ROOT / "src/core/vitaplus.c"),
+                "-I" + str(ROOT / "include"), str(ROOT / "src/core/vitashelflauncher.c"),
                 str(probe), "-o", str(binary)], check=True)
             subprocess.run([str(binary)], check=True, cwd=directory)
 

@@ -17,9 +17,9 @@
 #include <string.h>
 #include <sys/socket.h>
 
-#define VP_STAGE_DIR "ux0:data/vitaplus/staging/latest"
+#define VP_STAGE_DIR "ux0:data/vitashelflauncher/staging/latest"
 #define VP_COVER_SOURCE_LIMIT (8 * 1024 * 1024)
-#define VP_COVER_SOURCE_PATH "ux0:data/vitaplus/cache/covers/.source-image"
+#define VP_COVER_SOURCE_PATH "ux0:data/vitashelflauncher/cache/covers/.source-image"
 /* Large libcurl and socket buffers keep the Vita's Wi-Fi link from stalling on big ROMs. */
 #define VP_TRANSFER_BUFFER_SIZE (512 * 1024)
 /* Progress callbacks are throttled so UI redraws do not slow the transfer down. */
@@ -85,8 +85,8 @@ static void record_http_failure(const char *url, CURLcode result, long status, c
     FILE *log;
     if (result == CURLE_OK && status >= 200 && status < 300) return;
     (void)sceIoMkdir("ux0:data", 0777);
-    (void)sceIoMkdir("ux0:data/vitaplus", 0777);
-    log = fopen("ux0:data/vitaplus/network.log", "a");
+    (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
+    log = fopen("ux0:data/vitashelflauncher/network.log", "a");
     if (log == NULL) return;
     (void)fprintf(log, "url=%s\ncurl=%d (%s)\nhttp=%ld\ntruncated=%d\nbody=%.1024s\n---\n",
                   url != NULL ? url : "(null)", (int)result, curl_easy_strerror(result), status,
@@ -271,8 +271,8 @@ static bool extract_vpk(const char *vpk_path, const char *destination) {
 
 static bool promote_vpk(const char *vpk_path) {
     int result;
-    (void)sceIoMkdir("ux0:data/vitaplus", 0777);
-    (void)sceIoMkdir("ux0:data/vitaplus/staging", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher/staging", 0777);
     (void)sceIoMkdir(VP_STAGE_DIR, 0777);
     if (!extract_vpk(vpk_path, VP_STAGE_DIR)) return false;
     result = sceSysmoduleLoadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL);
