@@ -3,10 +3,13 @@ CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pedantic -Iinclude
 CORE = src/core/vitashelflauncher.c
 TEST = build/test_core
 
-.PHONY: test test-ui test-vita-lifecycle test-assets test-renderer clean
+.PHONY: test test-ui test-vita-lifecycle test-assets test-renderer test-release-automation clean
 
-test: $(TEST) test-ui test-vita-lifecycle
+test: $(TEST) test-ui test-vita-lifecycle test-release-automation
 	$(TEST)
+
+test-release-automation:
+	python3 tests/test_release_automation.py
 
 test-ui: build/test_presentation build/test_catalog_cache
 	build/test_presentation
