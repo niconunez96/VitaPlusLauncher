@@ -1,11 +1,49 @@
-build/
-build-vita/
-dist/
+# Build and VitaSDK artifacts
+/build/
+/build-*/
+/cmake-build-*/
+/dist/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
 *.vpk
 *.elf
 *.self
 *.velf
 *.suprx
 *.skprx
+
+# Local configuration and secrets
+/config.ini
+*.local.ini
+.env
+.env.*
+!.env.example
+
+# Python, Go, and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+*.test
+
+# Editors and operating systems
 .vscode/
-__pycache__
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Local agent state and captures
+.atl/
+.agents/cache/
+.agents/*.local.*
+AGENTS.local.md
+captures/
+*.log
+*.tmp

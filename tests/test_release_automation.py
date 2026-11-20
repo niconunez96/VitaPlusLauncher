@@ -77,6 +77,15 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("gh release create", workflow)
         self.assertIn("--generate-notes", workflow)
 
+    def test_local_vpk_builder_exposes_a_docker_free_interface(self) -> None:
+        script = ROOT / "scripts" / "build-vpk-local.sh"
+        result = subprocess.run([str(script), "--help"], cwd=ROOT, text=True, capture_output=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--clean", result.stdout)
+        self.assertIn("--build-type", result.stdout)
+        self.assertIn("VITASDK", result.stdout)
+        self.assertNotIn("docker", script.read_text(encoding="utf-8").lower())
+
 
 if __name__ == "__main__":
     unittest.main()
