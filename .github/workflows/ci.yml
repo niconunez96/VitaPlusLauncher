@@ -9,6 +9,17 @@ permissions:
   contents: read
 
 jobs:
+  validate-pr-title:
+    name: Validate pull request title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce conventional pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python3 scripts/validate_pr_title.py --title "$PR_TITLE"
+
   validate:
     name: Validate release-intent commits
     runs-on: ubuntu-latest
