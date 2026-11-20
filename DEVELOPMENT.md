@@ -3,7 +3,7 @@
 ## Requirements
 
 - `gcc`, `make`, Python 3, and Go for host checks.
-- Docker **or** a local VitaSDK installation to build the VPK.
+- A local VitaSDK installation (default location: `~/.local/vitasdk`) or Docker to build the VPK.
 
 ## Test
 
@@ -16,22 +16,28 @@ The host suite does not require VitaSDK or network access.
 
 ## Build a VPK
 
-Docker (recommended):
+With a local VitaSDK (recommended):
 
 ```sh
-./scripts/build-vpk.sh
+./scripts/build-vpk-local.sh --clean
 ```
 
-The artifact is `dist/vitashelflauncher.vpk`.
+It defaults to `~/.local/vitasdk`; set `VITASDK` if your SDK is elsewhere. The artifact is `dist/vitashelflauncher.vpk`.
 
-With VitaSDK installed:
+Docker alternative:
+
+```sh
+./scripts/build-vpk.sh --clean
+```
+
+For manual VitaSDK configuration:
 
 ```sh
 cmake -S . -B build/vita -DCMAKE_TOOLCHAIN_FILE="$VITASDK/share/vita.toolchain.cmake"
 cmake --build build/vita
 ```
 
-The artifact is `build/vita/vitashelflauncher.vpk`.
+The direct-build artifact is `build/vita/vitashelflauncher.vpk`.
 
 ## Before committing
 
