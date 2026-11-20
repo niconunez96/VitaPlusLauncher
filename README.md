@@ -6,11 +6,11 @@ Homebrew launcher for PS Vita/PSTV. Browse your local library and connect your p
 
 ## Capturas / Screenshots
 
-Capturas reales de la app ejecutándose en Vita3K. La primera muestra la biblioteca inicial; la segunda indica dónde configurar tu servidor RomM. / Real screenshots of the app running in Vita3K. The first shows the initial library; the second points to the RomM server setup.
+Capturas reales de la app ejecutándose en Vita3K. La primera muestra una biblioteca sincronizada desde RomM; la segunda indica dónde configurar tu servidor RomM. / Real screenshots of the app running in Vita3K. The first shows a library synchronized from RomM; the second points to the RomM server setup.
 
 ### Biblioteca / Library
 
-![Biblioteca vacía de VitaShelf Launcher](docs/images/vitashelf-home.png)
+![Biblioteca de VitaShelf Launcher sincronizada desde RomM](docs/images/vitashelf-home.png)
 
 ### Conexión (RomM) / Connection (RomM)
 
