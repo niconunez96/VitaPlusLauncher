@@ -1,0 +1,200 @@
+[
+  {
+    "file": "fonts/Inter-Regular.ttf",
+    "source": "https://raw.githubusercontent.com/rsms/inter/master/docs/font-files/Inter-Regular.woff2",
+    "sha256_source": "e06f6b1bc553aaea4e4668023ed0ab0a147129c3107f511bc7d03d361b0ae085"
+  },
+  {
+    "file": "fonts/Inter-Medium.ttf",
+    "source": "https://raw.githubusercontent.com/rsms/inter/master/docs/font-files/Inter-Medium.woff2",
+    "sha256_source": "0ff3e94614e1493eb556314fd247ae6c4a85a7783b4cc86be539940cf83f2a48"
+  },
+  {
+    "file": "fonts/Inter-SemiBold.ttf",
+    "source": "https://raw.githubusercontent.com/rsms/inter/master/docs/font-files/Inter-SemiBold.woff2",
+    "sha256_source": "5cb7103e4e605989afebc03d989c79201e54b21b5183db33981f70db9178a301"
+  },
+  {
+    "file": "fonts/Inter-Bold.ttf",
+    "source": "https://raw.githubusercontent.com/rsms/inter/master/docs/font-files/Inter-Bold.woff2",
+    "sha256_source": "fa888127b6da015b65569f0351f3b5c391ad928904951f1c20e9f8462a8d95ea"
+  },
+  {
+    "file": "logos/platform_nes.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/nes-w.svg",
+    "sha256_source": "1bc9ba5da665580216edeec6a18dba137dd016ac095c23c1008b3dd896e65fe7"
+  },
+  {
+    "file": "logos/platform_famicom.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/famicom.svg",
+    "sha256_source": "68d5aff8f9c30945124ad1990632103eea92998af2e7ff9277bad7710f654e16"
+  },
+  {
+    "file": "logos/platform_snes.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/snes.svg",
+    "sha256_source": "072a5fb569b14571e0b592435aa1264a64800758f81c33f44fa5e539c33ae5a1"
+  },
+  {
+    "file": "logos/platform_gameboy.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/gb.svg",
+    "sha256_source": "94ee4b2575da1c40b74ff992dff507e0485f0efa39c391dd61646bf38b5b1de3"
+  },
+  {
+    "file": "logos/platform_gameboycolor.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/gbc.svg",
+    "sha256_source": "c9f30d4397eec6366f32d3633b47f4efbf86eae2498d953192fd5355e3dd24fe"
+  },
+  {
+    "file": "logos/platform_gba.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/gba.svg",
+    "sha256_source": "abc90e426d8200b36aad1b12718a5afb6a3b5f2f8b473c7fb5b81acb4cba285c"
+  },
+  {
+    "file": "logos/platform_nds.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/nds.svg",
+    "sha256_source": "64d8de6445af32dd1d21e6921743698a7cf4ff0aee3783165694cb9c525d571d"
+  },
+  {
+    "file": "logos/platform_genesis.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/genesis.svg",
+    "sha256_source": "18940567b7ed93b9d12525d274f03c04ac16869b50491cb3ac426c7990a83134"
+  },
+  {
+    "file": "logos/platform_mastersystem.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/mastersystem.svg",
+    "sha256_source": "b2495f7050154286ceb75fc6cefccb5f5d88f687ff038e692547c6d21f1b2beb"
+  },
+  {
+    "file": "logos/platform_gamegear.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/gamegear-w.svg",
+    "sha256_source": "1ec64b0e0fa1f2bc88d636706f1af5d7338f290f098052742ea62e19a503859d"
+  },
+  {
+    "file": "logos/platform_psx.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/psx.svg",
+    "sha256_source": "3de2275b1d35009d6922498315a3374de30ecf3086f105ab0fe98f48de2f06de"
+  },
+  {
+    "file": "logos/platform_psp.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/psp.svg",
+    "sha256_source": "0d61cfe8391d2f3f554ea2bb3caf737cce137eb024f222903df269cc791aef2b"
+  },
+  {
+    "file": "logos/platform_vita.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/psvita-w.svg",
+    "sha256_source": "4bfa18bfad9fa17cca58d0174c896258b2f31541c5ec9f303e340444e5b52a57"
+  },
+  {
+    "file": "logos/platform_arcade.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/arcade.svg",
+    "sha256_source": "631a48b70ae3a802e7487bcc6bdb2be355afb2b2b9006c8867bc8145ff5d7294"
+  },
+  {
+    "file": "logos/platform_pce.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/pcengine-w.svg",
+    "sha256_source": "b74752e2f75d93800e476dca5c968166873714215041f8b2854faf3f7fb7aa9c"
+  },
+  {
+    "file": "logos/platform_atari2600.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/atari2600.svg",
+    "sha256_source": "127ba3c2379fbe97326fa339d6ea6e8ad0d742a3d68ad2ca1f7738780dcfd9e4"
+  },
+  {
+    "file": "logos/platform_wonderswan.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/wonderswan-w.svg",
+    "sha256_source": "011333f9c5b0dc767408bc13c637422f7ddd89d0d6dcc294319ee1231fad4a98"
+  },
+  {
+    "file": "logos/platform_homebrew.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/homebrew.svg",
+    "sha256_source": "72d475e81de3065b7896ccbab8495b7b2d52f5aa0ef1c381ece44a461905f0a8"
+  },
+  {
+    "file": "logos/platform_dreamcast.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/dreamcast-w.svg",
+    "sha256_source": "207be792ee52c3104ce2004614e75c93d10713e586192514580ea7e0da476509"
+  },
+  {
+    "file": "logos/platform_n3ds.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/3ds-w.svg",
+    "sha256_source": "9d9a3e35a667e8185f6228d774b5a2be8e7e23ef96be7d9bb19207d22ea90c90"
+  },
+  {
+    "file": "logos/platform_gamecube.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/gc-w.svg",
+    "sha256_source": "73899c68b4a0f0c7709a65d095ef6d86bb0d2a9f3579b07b1e2892b23e1089d7"
+  },
+  {
+    "file": "logos/platform_ps2.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/ps2.svg",
+    "sha256_source": "0ba15eb560c779d37423657c79356646f4252e0782ed8814c716701c0d186aae"
+  },
+  {
+    "file": "logos/platform_wii.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/wii-w.svg",
+    "sha256_source": "3035fb19bb5c1c0d8c8bb35dc57ead46b770922c8ab0d3ec80741680d135155d"
+  },
+  {
+    "file": "logos/platform_neogeo.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/logos/neogeo.svg",
+    "sha256_source": "7dfe3064bc89cae2244f537bbb1b3b573583e5415e9673f1407e4cff86869c54"
+  },
+  {
+    "file": "backgrounds/psx.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/psx.png",
+    "treatment": "Original hardware composited on the FLUX general background."
+  },
+  {
+    "file": "backgrounds/nes.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/nes.png",
+    "treatment": "Original hardware composited on the FLUX general background."
+  },
+  {
+    "file": "backgrounds/wonderswan.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/wonderswan.png",
+    "treatment": "Original hardware composited on the FLUX general background."
+  },
+  {
+    "file": "backgrounds/dreamcast.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/dreamcast.png",
+    "treatment": "Original hardware composited on the FLUX general background."
+  },
+  {
+    "file": "backgrounds/n3ds.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/3ds.png",
+    "treatment": "Original hardware composited on the FLUX general background."
+  },
+  {
+    "file": "backgrounds/gamecube.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/gc.png",
+    "treatment": "Original hardware composited on the FLUX general background."
+  },
+  {
+    "file": "backgrounds/ps2.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/ps2.png",
+    "treatment": "Original hardware composited on the FLUX general background."
+  },
+  {
+    "file": "backgrounds/neogeo.png",
+    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/neogeo.png",
+    "treatment": "Original hardware composited on the FLUX general background."
+  },
+  {
+    "file": "ui/ui_romm.png",
+    "source": "assets/aurora/ui_icons/ui_romm.png",
+    "upstream": "https://github.com/rommapp/romm/tree/master/frontend/assets",
+    "upstream_git_blob": "491e995d35661dbdc4f87cd2960f2ff87a336cf5",
+    "sha256_source": "96ada33571774e08b7cf9a0c66f41e35dc04d5b79d7f8d703da1a3993e0ab8ae",
+    "treatment": "Unchanged previously accepted circular RomM PNG."
+  },
+  {
+    "file": "ui/ui_buttons.png",
+    "source": [
+      "sources/button-cross.svg",
+      "sources/button-circle.svg",
+      "sources/button-square.svg",
+      "sources/button-triangle.svg"
+    ],
+    "treatment": "Original DualShock-style vector recreations, rasterized with supersampling into four 64x64 atlas cells."
+  }
+]

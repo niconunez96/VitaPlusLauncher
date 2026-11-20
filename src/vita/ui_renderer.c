@@ -1,96 +1,92 @@
 #include "ui_renderer.h"
-#include "ui_presentation.h"
+#include "ui_backdrop.h"
 #include <psp2/io/fcntl.h>
 #include <psp2/kernel/processmgr.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define C(r,g,b,a) ((unsigned int)(r) | ((unsigned int)(g)<<8) | ((unsigned int)(b)<<16) | ((unsigned int)(a)<<24))
-typedef struct { const char *name; int w, h; vita2d_texture *texture; bool attempted; } Asset;
-static Asset assets[] = {
-    {"wallpaper",480,272,NULL,false}, {"emblem",128,128,NULL,false},
-    {"platform_nes",128,128,NULL,false}, {"platform_famicom",128,128,NULL,false},
-    {"platform_snes",128,128,NULL,false}, {"platform_gameboy",128,128,NULL,false},
-    {"platform_gba",128,128,NULL,false}, {"platform_nds",128,128,NULL,false},
-    {"platform_genesis",128,128,NULL,false}, {"platform_mastersystem",128,128,NULL,false},
-    {"platform_gamegear",128,128,NULL,false}, {"platform_psx",128,128,NULL,false},
-    {"platform_psp",128,128,NULL,false}, {"platform_vita",128,128,NULL,false},
-    {"platform_arcade",128,128,NULL,false}, {"platform_pce",128,128,NULL,false},
-    {"platform_atari2600",128,128,NULL,false}, {"platform_wonderswan",128,128,NULL,false},
-    {"platform_homebrew",128,128,NULL,false}, {"platform_generic",128,128,NULL,false},
-    {"platform_dreamcast",128,128,NULL,false}, {"platform_n3ds",128,128,NULL,false},
-    {"platform_gamecube",128,128,NULL,false}, {"platform_ps2",128,128,NULL,false},
-    {"platform_wii",128,128,NULL,false}, {"ui_romm",64,64,NULL,false},
-    {"ui_library",64,64,NULL,false}, {"ui_home",64,64,NULL,false},
-    {"ui_store",64,64,NULL,false}, {"ui_settings",64,64,NULL,false},
-    {"ui_download",64,64,NULL,false}, {"ui_check",64,64,NULL,false},
-    {"ui_star",64,64,NULL,false}, {"ui_search",64,64,NULL,false},
-    {"ui_play",64,64,NULL,false}, {"ui_back",64,64,NULL,false},
-    {"ui_grid",64,64,NULL,false}, {"ui_list",64,64,NULL,false},
-    {"ui_carousel",64,64,NULL,false}, {"ui_sync",64,64,NULL,false},
-    {"ui_key",64,64,NULL,false}, {"ui_folder",64,64,NULL,false}
+#define C(r,g,b,a) ((unsigned int)(r)|((unsigned int)(g)<<8)|((unsigned int)(b)<<16)|((unsigned int)(a)<<24))
+typedef struct { const char *name; vita2d_texture *texture; bool attempted; } Asset;
+#define A(name) {name,NULL,false}
+static Asset assets[]={
+    A("emblem"),A("focus"),A("platform_nes"),A("platform_famicom"),A("platform_snes"),
+    A("platform_gameboy"),A("platform_gameboycolor"),A("platform_gba"),A("platform_nds"),
+    A("platform_genesis"),A("platform_mastersystem"),A("platform_gamegear"),A("platform_psx"),
+    A("platform_psp"),A("platform_vita"),A("platform_arcade"),A("platform_neogeo"),A("platform_pce"),
+    A("platform_atari2600"),A("platform_wonderswan"),A("platform_homebrew"),A("platform_generic"),
+    A("platform_dreamcast"),A("platform_n3ds"),A("platform_gamecube"),A("platform_ps2"),A("platform_wii"),
+    A("ui_library"),A("ui_store"),A("ui_settings"),A("ui_download"),A("ui_check"),A("ui_star"),
+    A("ui_home"),A("ui_key"),A("ui_sync"),A("ui_folder"),A("ui_general"),A("ui_interface"),
+    A("ui_storage"),A("ui_info"),A("ui_server"),A("ui_psx"),A("ui_romm"),A("ui_buttons")
 };
-static unsigned int bg, surface, ink, muted, accent;
+#undef A
+static unsigned int bg,surface,ink,muted,accent;
 static int asset_budget;
 static float entrance;
-static float dock_x = 278;
-static unsigned long long last_frame;
-static unsigned long long focus_at;
-static char focus_key[VP_TEXT + 64];
-static char last_notice[VP_TEXT];
+static unsigned long long focus_at,notice_at;
+static char focus_key[VP_TEXT+64],last_notice[VP_TEXT];
 static unsigned int last_notice_id;
-static unsigned long long notice_at;
-static VpUiAppearance appearance={180,16,130};
+static VpUiAppearance appearance={180,14,255};
 
 void vp_ui_load_theme(const char *ini) { vp_ui_appearance_load(&appearance,ini); }
-
-static unsigned int alpha(unsigned int c, unsigned int a) { return (c & 0xffffffu) | (a << 24); }
+static unsigned int alpha(unsigned int c,unsigned int a) { return (c&0xffffffu)|(a<<24); }
 static unsigned int rgb(uint32_t c) { return C((c>>16)&255,(c>>8)&255,c&255,255); }
-static unsigned int mix(unsigned int a, unsigned int b, float t) {
-    unsigned int out = 0;
-    int i;
-    for (i=0;i<3;i++) {
-        float av = (float)((a>>(8*i))&255), bv = (float)((b>>(8*i))&255);
-        out |= (unsigned int)(av+(bv-av)*t)<<(8*i);
+static unsigned int mix(unsigned int a,unsigned int b,float t) {
+    unsigned int result=0;
+    int channel;
+    for (channel=0;channel<3;channel++) {
+        float from=(float)((a>>(channel*8))&255),to=(float)((b>>(channel*8))&255);
+        result|=(unsigned int)(from+(to-from)*t)<<(channel*8);
     }
-    return out | 0xff000000u;
+    return result|0xff000000u;
 }
-static unsigned int color(const char *s, unsigned int fallback) {
+static unsigned int color(const char *s,unsigned int fallback) {
     unsigned int r,g,b;
-    return sscanf(s,"#%02x%02x%02x",&r,&g,&b)==3 ? C(r,g,b,255) : fallback;
+    return sscanf(s,"#%02x%02x%02x",&r,&g,&b)==3?C(r,g,b,255):fallback;
 }
 
-static void round_rect(float x,float y,float w,float h,float r,unsigned int c) {
-    vita2d_draw_rectangle(x+r,y,w-2*r,h,c);
-    vita2d_draw_rectangle(x,y+r,r,h-2*r,c);
-    vita2d_draw_rectangle(x+w-r,y+r,r,h-2*r,c);
-    vita2d_draw_fill_circle(x+r,y+r,r,c);
-    vita2d_draw_fill_circle(x+w-r,y+r,r,c);
-    vita2d_draw_fill_circle(x+r,y+h-r,r,c);
-    vita2d_draw_fill_circle(x+w-r,y+h-r,r,c);
+static void round_rect(float x,float y,float w,float h,float radius,unsigned int c) {
+    static const float cs[]={1.f,.9659258f,.8660254f,.7071068f,.5f,.258819f,0.f};
+    float r=fminf(radius,fminf(w,h)/2);
+    vita2d_color_vertex *vertices;
+    int corner,step,index=1;
+    if (w<=0 || h<=0) return;
+    /* One non-overlapping fan: translucent rectangles/circles would blend over
+     * each other and leave dark discs at every corner. Pool lifetime spans GPU use. */
+    vertices=vita2d_pool_memalign(30*sizeof(*vertices),sizeof(float));
+    if (!vertices) return;
+    vertices[0]=(vita2d_color_vertex){x+w/2,y+h/2,.5f,c};
+    for (corner=0;corner<4;corner++) for (step=0;step<=6;step++) {
+        float a=cs[step],b=cs[6-step],px,py;
+        if (corner==0) { px=x+w-r+r*b; py=y+r-r*a; }
+        else if (corner==1) { px=x+w-r+r*a; py=y+h-r+r*b; }
+        else if (corner==2) { px=x+r-r*b; py=y+h-r+r*a; }
+        else { px=x+r-r*a; py=y+r-r*b; }
+        vertices[index++]=(vita2d_color_vertex){px,py,.5f,c};
+    }
+    vertices[index++]=vertices[1];
+    vita2d_draw_array(SCE_GXM_PRIMITIVE_TRIANGLE_FAN,vertices,(size_t)index);
 }
 
 static vita2d_texture *asset(const char *name) {
     size_t i;
     for (i=0;i<sizeof(assets)/sizeof(assets[0]);i++) {
         Asset *a=&assets[i];
-        if (strcmp(a->name,name)!=0) continue;
+        if (strcmp(name,a->name)) continue;
         if (!a->attempted && asset_budget>0) {
-            char path[128];
-            unsigned char header[29];
-            SceUID fd;
-            a->attempted=true; asset_budget--;
-            (void)snprintf(path,sizeof(path),"app0:assets/aurora/%s.png",a->name);
+            char path[160]; unsigned char header[29]; SceUID fd;
+            unsigned int w=!strncmp(name,"platform_",9) || !strcmp(name,"ui_buttons")?128:(!strcmp(name,"focus")?96:64);
+            unsigned int h=w;
+            a->attempted=true; --asset_budget;
+            (void)snprintf(path,sizeof(path),"app0:assets/blueglass/%s/%s.png",!strncmp(name,"platform_",9)?"logos":"ui",name);
             fd=sceIoOpen(path,SCE_O_RDONLY,0);
             if (fd>=0) {
-                int read_count=sceIoRead(fd,header,sizeof(header));
-                SceOff length=sceIoLseek(fd,0,SCE_SEEK_END);
-                sceIoClose(fd);
-                if (read_count==(int)sizeof(header) && length>0 && length<=512*1024 &&
-                    vp_safe_cover_png(header,sizeof(header)) &&
-                    ((unsigned int)header[18]*256+header[19])==(unsigned int)a->w &&
-                    ((unsigned int)header[22]*256+header[23])==(unsigned int)a->h) {
+                int count=sceIoRead(fd,header,sizeof(header));
+                SceOff length=sceIoLseek(fd,0,SCE_SEEK_END); sceIoClose(fd);
+                if (count==(int)sizeof(header) && length>0 && length<=512*1024 && vp_safe_cover_png(header,sizeof(header)) &&
+                    ((unsigned int)header[18]*256+header[19])==w && ((unsigned int)header[22]*256+header[23])==h) {
                     a->texture=vita2d_load_PNG_file(path);
                     if (a->texture) vita2d_texture_set_filters(a->texture,SCE_GXM_TEXTURE_FILTER_LINEAR,SCE_GXM_TEXTURE_FILTER_LINEAR);
                 }
@@ -101,92 +97,48 @@ static vita2d_texture *asset(const char *name) {
     return NULL;
 }
 
-static void fit(vita2d_texture *t,float x,float y,float w,float h,unsigned int tint) {
+static void fit(vita2d_texture *texture,float x,float y,float w,float h,unsigned int tint) {
     float tw,th,s;
-    if (!t) return;
-    tw=(float)vita2d_texture_get_width(t); th=(float)vita2d_texture_get_height(t);
+    if (!texture) return;
+    tw=(float)vita2d_texture_get_width(texture); th=(float)vita2d_texture_get_height(texture);
     if (tw<=0 || th<=0) return;
     s=fminf(w/tw,h/th);
-    vita2d_draw_texture_tint_scale(t,x+(w-tw*s)/2,y+(h-th*s)/2,s,s,tint);
+    vita2d_draw_texture_tint_scale(texture,x+(w-tw*s)/2,y+(h-th*s)/2,s,s,tint);
 }
+
 static void icon(const char *name,float x,float y,float size) {
-    vita2d_texture *t=asset(name);
-    if (t) fit(t,x,y,size,size,0xffffffffu);
-    else {
-        round_rect(x+size*.2f,y+size*.2f,size*.6f,size*.6f,size*.15f,alpha(accent,100));
-        vita2d_draw_fill_circle(x+size*.5f,y+size*.5f,size*.09f,ink);
+    vita2d_texture *texture=asset(name);
+    if (texture) fit(texture,x,y,size,size,0xffffffffu);
+}
+
+static void text(const VpUiFrame *f,VpTypeRole role,int x,int y,int width,unsigned int c,const char *value) {
+    vp_ui_text(f->font,role,false,x,y,width,c,value);
+}
+
+/* Nine slices preserve the corner radius and glow at every card size. */
+static void focus(VpUiRect r) {
+    vita2d_texture *texture=asset("focus");
+    int ix,iy;
+    float xs[]={r.x-18,r.x+14,r.x+r.w-14,r.x+r.w+18};
+    float ys[]={r.y-18,r.y+14,r.y+r.h-14,r.y+r.h+18};
+    if (!texture) {
+        round_rect(r.x-3,r.y-3,r.w+6,r.h+6,16,C(130,220,255,255));
+        round_rect(r.x,r.y,r.w,r.h,14,C(40,100,220,255));
+        return;
+    }
+    for (iy=0;iy<3;iy++) for (ix=0;ix<3;ix++) {
+        float w=xs[ix+1]-xs[ix],h=ys[iy+1]-ys[iy];
+        if (w>0 && h>0)
+            vita2d_draw_texture_tint_part_scale(texture,xs[ix],ys[iy],ix*32,iy*32,32,32,w/32,h/32,0xffffffffu);
     }
 }
 
-/* Width-based UTF-8 truncation, rather than cutting arbitrary bytes mid-glyph. */
-static void label(vita2d_pgf *font,int x,int y,int width,float scale,unsigned int c,const char *value) {
-    char text[VP_URL+4];
-    size_t length,n;
-    if (width<=0 || value==NULL) return;
-    /* Keep small PGF labels readable; truncate at the final drawing scale. */
-    scale=fmaxf(scale,.75f);
-    length=strlen(value); n=length;
-    if (n>sizeof(text)-4) n=sizeof(text)-4;
-    while (n>0 && ((unsigned char)value[n]&0xc0)==0x80) --n;
-    memcpy(text,value,n); text[n]='\0';
-    if (n<length || vita2d_pgf_text_width(font,scale,text)>width) {
-        for (;;) {
-            memcpy(text+n,"...",4);
-            if (vita2d_pgf_text_width(font,scale,text)<=width) break;
-            if (n==0) { text[0]='\0'; break; }
-            do { --n; } while (n>0 && ((unsigned char)text[n]&0xc0)==0x80);
-        }
-    }
-    vita2d_pgf_draw_text(font,x,y,c,scale,text);
-}
-
-static void two_line_label(vita2d_pgf *font,int x,int y,int width,unsigned int c,const char *value) {
-    char line[VP_URL+4];
-    const char *p=value,*split=NULL;
-    if (vita2d_pgf_text_width(font,.75f,value)<=width) { label(font,x,y,width,.75f,c,value); return; }
-    while ((p=strchr(p,' '))!=NULL) {
-        size_t n=(size_t)(p-value);
-        if (n>=sizeof(line)) break;
-        memcpy(line,value,n); line[n]='\0';
-        if (vita2d_pgf_text_width(font,.75f,line)>width) break;
-        split=p++;
-    }
-    if (!split) { label(font,x,y,width,.75f,c,value); return; }
-    memcpy(line,value,(size_t)(split-value)); line[split-value]='\0';
-    label(font,x,y,width,.75f,c,line);
-    while (*split==' ') ++split;
-    label(font,x,y+24,width,.75f,c,split);
-}
-
-#ifdef VP_UI_TESTING
-/* Probe the private renderer text boundary without exporting a production API. */
-void vp_ui_test_label(vita2d_pgf *font,int width,const char *value) {
-    label(font,0,24,width,.45f,0xffffffffu,value);
-}
-#endif
-
-static void card(float x,float y,float w,float h,bool selected,unsigned int tint) {
-    int lift=selected ? (int)(4*entrance) : 0;
-    round_rect(x,y+5,w,h,17, C(0,0,0,60));
-    if (selected) round_rect(x-3,y-lift-3,w+6,h+6,(float)appearance.radius+3,alpha(tint,190));
-    round_rect(x,y-lift,w,h,(float)appearance.radius,selected ? mix(surface,tint,.16f) : mix(surface,bg,.12f));
-    vita2d_draw_line(x+18,y-lift+1,x+w-18,y-lift+1,alpha(ink,selected?90:24));
-}
-
-static void backdrop(vita2d_texture *cover) {
-    vita2d_texture *wall=asset("wallpaper");
-    int y;
-    vita2d_draw_rectangle(0,0,960,544,bg);
-    if (wall) vita2d_draw_texture_tint_scale(wall,0,0,2,2,C(160,170,195,appearance.wallpaper_alpha));
-    if (cover) {
-        float tw=(float)vita2d_texture_get_width(cover), th=(float)vita2d_texture_get_height(cover);
-        float s=fmaxf(960/tw,544/th);
-        vita2d_draw_texture_tint_scale(cover,(960-tw*s)/2+6*(1-entrance),(544-th*s)/2,s,s,C(120,135,160,60));
-    }
-    for (y=0;y<544;y+=16) {
-        unsigned int opacity=(unsigned int)(y<140 ? 95-y/3 : 45+(y-140)/3);
-        vita2d_draw_rectangle(0,y,960,16,alpha(bg,opacity));
-    }
+static void glass(VpUiRect r,bool selected,bool dark) {
+    unsigned int fill=dark?alpha(mix(bg,C(15,24,50,255),.45f),180):alpha(mix(surface,ink,.55f),70);
+    round_rect(r.x,r.y+5,r.w,r.h,14,C(14,33,77,30));
+    round_rect(r.x-1,r.y-1,r.w+2,r.h+2,15,C(224,239,255,90));
+    round_rect(r.x,r.y,r.w,r.h,14,selected?alpha(accent,140):fill);
+    if (selected) focus(r);
 }
 
 static size_t position(const VpUiFrame *f) {
@@ -194,296 +146,372 @@ static size_t position(const VpUiFrame *f) {
     for (i=0;i<f->visible_count;i++) if (f->visible[i]==f->app->selected_item) return i;
     return 0;
 }
-static void pages(const VpUiFrame *f,size_t selected,size_t total,size_t page_size) {
-    char s[48];
-    if (!total) return;
-    (void)snprintf(s,sizeof(s),"%u / %u",(unsigned)(selected/page_size+1),(unsigned)((total+page_size-1)/page_size));
-    label(f->font,848,132,84,.52f,muted,s);
+
+static const char *platform_asset(const VpUiFrame *f) {
+    if (f->app->active_screen!=VP_SCREEN_LIBRARY) return NULL;
+    if (f->app->library_level==VP_LEVEL_PLATFORMS)
+        return f->group_count?vp_ui_platform(f->groups[f->app->selected_platform].platform)->asset:NULL;
+    return vp_ui_platform(f->app->active_platform)->asset;
+}
+
+void vp_ui_prepare(const VpUiFrame *f) {
+    static const char *common[]={"emblem","focus","ui_buttons","ui_library","ui_store","ui_settings","ui_download","ui_check","ui_star","ui_psx"};
+    size_t i,start;
+    asset_budget=3;
+    for (i=0;i<sizeof(common)/sizeof(common[0]);i++) (void)asset(common[i]);
+    if (f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_PLATFORMS) {
+        start=vp_ui_console_start(f->app->selected_platform,f->group_count);
+        for (i=start;i<f->group_count && i<start+VP_UI_CONSOLE_PAGE;i++) (void)asset(vp_ui_platform(f->groups[i].platform)->asset);
+    } else if (f->app->active_screen==VP_SCREEN_SETTINGS) {
+        const char *icons[]={"ui_general","ui_interface","ui_download","ui_romm","ui_storage","ui_info","ui_home","ui_key","ui_sync","ui_folder"};
+        for (i=0;i<sizeof(icons)/sizeof(icons[0]);i++) (void)asset(icons[i]);
+    }
+    if (platform_asset(f)) (void)asset(platform_asset(f));
+    asset_budget=0;
+    vp_ui_backdrop_prepare(f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_PLATFORMS?
+        platform_asset(f):NULL,sceKernelGetProcessTimeWide());
+}
+
+static void backdrop(const VpUiFrame *f,unsigned long long now) {
+    int y;
+    bool settings=f->app->active_screen==VP_SCREEN_SETTINGS;
+    for (y=0;y<544;y+=8) {
+        float t=(float)y/544;
+        vita2d_draw_rectangle(0,y,960,8,mix(bg,C(176,200,246,255),t));
+    }
+    vp_ui_backdrop_draw(now,appearance.motion_ms,(unsigned int)appearance.wallpaper_alpha,
+        f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_ROMS);
+    if (!settings && f->app->library_level==VP_LEVEL_ROMS && f->background && f->app->active_view!=VP_VIEW_GRID)
+        fit(f->background,370,58,590,380,C(255,255,255,125));
+    if (!settings) {
+        for (y=110;y<492;y+=8) {
+            unsigned int a=(unsigned int)(30+145*(float)(y-110)/382);
+            vita2d_draw_rectangle(0,y,960,8,C(192,210,250,a));
+        }
+    }
+    for (y=0;y<72;y+=8) vita2d_draw_rectangle(0,y,960,8,C(21,35,73,(unsigned int)(80-y)));
+}
+
+static void header(const VpUiFrame *f) {
+    static const char *names[]={"Biblioteca","Tienda","Ajustes"};
+    static const char *icons[]={"ui_library","ui_store","ui_settings"};
+    int i;
+    icon("emblem",30,19,30);
+    text(f,VP_TYPE_BRAND,68,41,164,ink,"VitaPlus");
+    static const int tab_x[]={256,406,518},tab_w[]={146,108,120};
+    round_rect(252,13,390,44,22,C(100,126,181,65));
+    for (i=0;i<3;i++) {
+        bool selected=(int)f->app->active_screen==i;
+        VpUiRect r={tab_x[i],17,tab_w[i],36};
+        if (selected) { round_rect(r.x,r.y,r.w,r.h,18,C(16,82,215,210)); focus(r); }
+        icon(icons[i],r.x+12,r.y+7,23);
+        vp_ui_text(f->font,VP_TYPE_NAV,selected,r.x+42,r.y+24,r.w-46,selected?ink:C(231,237,255,210),names[i]);
+    }
+    text(f,VP_TYPE_STATUS,664,39,100,ink,f->date);
+    vita2d_draw_line(772,23,772,43,C(225,235,255,140));
+    text(f,VP_TYPE_STATUS,784,39,60,ink,f->time);
+    vita2d_draw_line(852,23,852,43,C(225,235,255,140));
+    if (f->battery_percent>=0) {
+        char percentage[16]; int percent=f->battery_percent>100?100:f->battery_percent;
+        (void)snprintf(percentage,sizeof(percentage),"%d%%",percent);
+        text(f,VP_TYPE_STATUS,864,39,44,ink,percentage);
+        round_rect(912,25,30,15,3,C(237,244,255,245));
+        vita2d_draw_rectangle(942,29,3,7,ink);
+        round_rect(914,27,26,11,2,C(38,61,108,255));
+        if (percent) vita2d_draw_rectangle(915,28,24*percent/100.f,9,f->battery_charging?C(98,218,249,255):C(107,235,126,255));
+    }
+}
+
+static void heading(const VpUiFrame *f) {
+    char subtitle[96]; const char *title="Biblioteca",*logo=platform_asset(f);
+    if (f->app->active_screen!=VP_SCREEN_LIBRARY) return;
+    if (f->app->library_level==VP_LEVEL_ROMS) {
+        title=f->visible_count?f->app->catalog.items[f->visible[position(f)]].platform_display:f->app->active_platform;
+        (void)snprintf(subtitle,sizeof(subtitle),"%u juegos",(unsigned)f->visible_count);
+    } else (void)snprintf(subtitle,sizeof(subtitle),"%u consolas   •   %u juegos",(unsigned)f->group_count,(unsigned)f->app->catalog.count);
+    if (logo && !strcmp(logo,"platform_psx")) icon("ui_psx",45,81,54);
+    else if (logo) fit(asset(logo),40,81,65,51,0xffffffffu);
+    text(f,VP_TYPE_PAGE_TITLE,118,115,670,ink,title);
+    text(f,VP_TYPE_PAGE_SUBTITLE,119,140,650,C(237,244,255,240),subtitle);
+    if (f->app->library_level==VP_LEVEL_ROMS && f->visible_count) {
+        char count[32]; (void)snprintf(count,sizeof(count),"%u / %u",(unsigned)position(f)+1,(unsigned)f->visible_count);
+        text(f,VP_TYPE_STATUS,870,141,70,C(17,37,82,255),count);
+    }
 }
 
 static void platforms(const VpUiFrame *f) {
-    size_t start=(f->app->selected_platform/8)*8,i;
-    for (i=start;i<f->group_count && i<start+8;i++) {
-        const VpPlatformGroup *g=&f->groups[i];
-        const VpUiPlatform *p=vp_ui_platform(g->platform);
-        VpUiRect r=vp_ui_tile(i-start);
+    size_t start=vp_ui_console_start(f->app->selected_platform,f->group_count),i;
+    for (i=start;i<f->group_count && i<start+VP_UI_CONSOLE_PAGE;i++) {
+        const VpUiPlatform *platform=vp_ui_platform(f->groups[i].platform);
+        VpUiRect r=vp_ui_console_tile(i-start);
         bool selected=i==f->app->selected_platform;
-        unsigned int tint=rgb(p->rgb);
-        char count[32];
-        card(r.x,r.y,r.w,r.h,selected,tint);
-        round_rect(r.x+12,r.y+12,74,78,14,mix(surface,tint,.23f));
-        icon(p->asset,r.x+8,r.y+9-(selected?(int)(3*entrance):0),84);
-        two_line_label(f->font,r.x+96,r.y+32,108,ink,g->display);
-        (void)snprintf(count,sizeof(count),"%u juegos",(unsigned)g->count);
-        label(f->font,r.x+96,r.y+88,108,.75f,muted,count);
-        round_rect(r.x+98,r.y+106,selected?54:22,3,1,tint);
+        if (selected) { r.y-=(int)(7*entrance); r.h+=7; }
+        glass(r,selected,true);
+        fit(asset(platform->asset),r.x+9,r.y+21,r.w-18,84,0xffffffffu);
+        round_rect(r.x+(r.w-34)/2,r.y+r.h-16,34,4,2,rgb(platform->rgb));
     }
-    pages(f,f->app->selected_platform,f->group_count,8);
+    if (f->group_count) {
+        const VpPlatformGroup *group=&f->groups[f->app->selected_platform]; char detail[VP_TEXT+40];
+        (void)snprintf(detail,sizeof(detail),"%s  ·  %u juegos",group->display,(unsigned)group->count);
+        text(f,VP_TYPE_CONSOLE_TITLE,48,462,850,C(24,44,88,255),detail);
+    }
 }
 
-static void badge(int x,int y,const VpItem *item) {
-    round_rect(x,y,24,24,8,alpha(bg,235));
-    icon(item->installed?"ui_check":"ui_download",x+1,y+1,22);
+static void cover(vita2d_texture *texture,const VpItem *item,VpUiRect r,unsigned int tint) {
+    round_rect(r.x,r.y,r.w,r.h,10,C(17,31,65,225));
+    if (texture) fit(texture,r.x+3,r.y+3,r.w-6,r.h-6,tint);
+    else {
+        fit(asset(vp_ui_platform(item->platform)->asset),r.x+12,r.y+r.h*.2f,r.w-24,r.h*.4f,0xffffffffu);
+        /* Missing artwork remains identifiable and actionable offline. */
+    }
 }
-static void placeholder(const VpItem *item,float x,float y,float w,float h) {
-    round_rect(x,y,w,h,10,mix(surface,accent,.1f));
-    icon(vp_ui_platform(item->platform)->asset,x+(w-60)/2,y+(h-60)/2,60);
+
+static void tag(const VpUiFrame *f,int x,int y,int width,const char *value) {
+    round_rect(x,y,width,22,7,C(85,111,173,100));
+    vita2d_draw_line(x+6,y,x+width-6,y,C(255,255,255,210));
+    text(f,VP_TYPE_GRID_TITLE,x+7,y+16,width-14,ink,value);
 }
 
 static void roms(const VpUiFrame *f) {
     size_t pos=position(f),i,start;
+    const VpItem *selected=&f->app->catalog.items[f->visible[pos]];
     if (f->app->active_view==VP_VIEW_GRID) {
-        start=(pos/8)*8;
-        for (i=start;i<f->visible_count && i<start+8;i++) {
+        start=(pos/VP_UI_GRID_PAGE)*VP_UI_GRID_PAGE;
+        for (i=start;i<f->visible_count && i<start+VP_UI_GRID_PAGE;i++) {
             const VpItem *item=&f->app->catalog.items[f->visible[i]];
-            VpUiRect r=vp_ui_tile(i-start);
-            card(r.x,r.y,r.w,r.h,f->visible[i]==f->app->selected_item,accent);
-            if (f->covers[i-start]) fit(f->covers[i-start],r.x+8,r.y+8,74,104,0xffffffffu);
-            else placeholder(item,r.x+10,r.y+12,70,96);
-            two_line_label(f->font,r.x+92,r.y+30,110,ink,item->title);
-            label(f->font,r.x+92,r.y+80,110,.75f,muted,item->platform_display);
-            badge(r.x+92,r.y+94,item);
-            if (item->favorite) icon("ui_star",r.x+166,r.y+94,25);
+            bool active=i==pos; VpUiRect r=vp_ui_tile(i-start);
+            cover(f->covers[i-start],item,r,0xffffffffu);
+            if (active) {
+                const char *platform=vp_ui_platform_label(item->platform);
+                int tag_width=vp_ui_text_width(f->font,VP_TYPE_GRID_TITLE,false,platform)+14;
+                if (tag_width>68) tag_width=68;
+                round_rect(r.x,r.y+r.h-29,r.w,29,8,C(13,32,79,225));
+                text(f,VP_TYPE_GRID_TITLE,r.x+9,r.y+r.h-10,r.w-tag_width-19,ink,item->title);
+                tag(f,r.x+r.w-tag_width-4,r.y+r.h-25,tag_width,platform);
+                focus(r);
+            }
+            if (item->favorite) icon("ui_star",r.x+r.w-25,r.y+5,20);
+            icon(item->installed?"ui_check":"ui_download",r.x+5,r.y+5,19);
         }
-        pages(f,pos,f->visible_count,8);
     } else if (f->app->active_view==VP_VIEW_LIST) {
-        start=(pos/6)*6;
-        for (i=start;i<f->visible_count && i<start+6;i++) {
+        VpUiRect hero={382,160,212,262};
+        start=(pos/VP_UI_LIST_PAGE)*VP_UI_LIST_PAGE;
+        round_rect(37,174,3,258,1,C(235,244,255,140));
+        round_rect(36,174+(int)(pos-start)*52,5,44,2,C(28,94,203,210));
+        for (i=start;i<f->visible_count && i<start+VP_UI_LIST_PAGE;i++) {
             const VpItem *item=&f->app->catalog.items[f->visible[i]];
-            int y=146+(int)(i-start)*43;
-            bool selected=f->visible[i]==f->app->selected_item;
-            round_rect(28,y,904,39,11,selected?mix(surface,accent,.2f):alpha(surface,210));
-            if (selected) round_rect(28,y+8,4,23,2,accent);
-            badge(39,y+7,item);
-            label(f->font,77,y+25,620,.65f,selected?accent:ink,item->title);
-            label(f->font,718,y+25,172,.51f,muted,item->platform_display);
-            if (item->favorite) icon("ui_star",896,y+7,24);
+            VpUiRect r=vp_ui_list_row(i-start); bool active=i==pos;
+            if (active) glass(r,true,false);
+            fit(f->covers[i-start],r.x+10,r.y+4,38,40,0xffffffffu);
+            vp_ui_text(f->font,VP_TYPE_LIST_TITLE,active,r.x+62,r.y+29,r.w-74,C(13,32,73,255),item->title);
         }
-        pages(f,pos,f->visible_count,6);
+        cover(f->covers[pos-start],selected,hero,0xffffffffu); focus(hero);
+        text(f,VP_TYPE_HERO_TITLE,620,203,300,C(12,31,74,255),selected->title);
+        tag(f,620,218,86,vp_ui_platform_label(selected->platform));
+        vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,620,269,292,8,C(17,37,80,255),
+            selected->description[0]?selected->description:"Sin descripción disponible.");
     } else {
-        /* f->covers is explicitly previous/selected/next, including wraparound. */
-        size_t indexes[3]={(pos+f->visible_count-1)%f->visible_count,pos,(pos+1)%f->visible_count};
-        for (i=0;i<3;i++) {
-            const VpItem *item=&f->app->catalog.items[f->visible[indexes[i]]];
-            int x=i==0?116:(i==1?365:654),y=i==1?142:173,w=i==1?230:190,h=i==1?264:204;
-            if (f->visible_count==1 && i!=1) continue;
-            card(x,y,w,h,i==1,accent);
-            if (f->covers[i]) fit(f->covers[i],x+12,y+10,w-24,h-46,i==1?0xffffffffu:C(180,185,200,230));
-            else placeholder(item,x+12,y+10,w-24,h-46);
-            label(f->font,x+14,y+h-16,w-28,.6f,ink,item->title);
-            badge(x+w-35,y+10,item);
+        int offset;
+        for (offset=-3;offset<=3;offset++) {
+            size_t index=(pos+f->visible_count+(size_t)((offset+(int)f->visible_count)%(int)f->visible_count))%f->visible_count;
+            const VpItem *item=&f->app->catalog.items[f->visible[index]];
+            VpUiRect r=vp_ui_carousel_tile(offset);
+            if ((f->visible_count<7 && abs(offset)>(int)f->visible_count/2) ||
+                (f->visible_count%2==0 && offset<0 && abs(offset)==(int)f->visible_count/2)) continue;
+            cover(f->covers[offset+3],item,r,offset?C(245,248,255,210):0xffffffffu);
+            if (offset) {
+                vita2d_draw_rectangle(r.x,r.y+r.h+4,r.w,18,C(148,175,233,35));
+            } else focus(r);
         }
-        pages(f,pos,f->visible_count,1);
+        {
+            int title_width=vp_ui_text_width(f->font,VP_TYPE_HERO_TITLE,false,selected->title);
+            const char *platform=vp_ui_platform_label(selected->platform);
+            int tag_width=vp_ui_text_width(f->font,VP_TYPE_GRID_TITLE,false,platform)+14,x;
+            if (title_width>560) title_width=560;
+            x=(960-title_width-tag_width-12)/2;
+            text(f,VP_TYPE_HERO_TITLE,x,438,title_width,C(11,30,75,255),selected->title);
+            tag(f,x+title_width+12,419,tag_width,platform);
+            for (i=0;i<f->visible_count && i<7;i++)
+                vita2d_draw_fill_circle(480+((int)i-(int)(f->visible_count<7?f->visible_count:7)/2)*15,462,3.5f,
+                    i==pos%7?C(20,49,110,255):C(245,250,255,230));
+        }
     }
 }
 
 static const char *download_label(VpDownloadState state) {
     switch (state) {
-        case VP_DOWNLOAD_PENDING:return "En cola";
-        case VP_DOWNLOAD_DOWNLOADING:return "Descargando";
-        case VP_DOWNLOAD_COMPLETED:return "Completada";
-        case VP_DOWNLOAD_FAILED:return "Fallida";
-        case VP_DOWNLOAD_CANCELED:return "Cancelada";
-        case VP_DOWNLOAD_PAUSED:return "Pausada";
+        case VP_DOWNLOAD_PENDING:return "En cola"; case VP_DOWNLOAD_DOWNLOADING:return "Descargando";
+        case VP_DOWNLOAD_COMPLETED:return "Completada"; case VP_DOWNLOAD_FAILED:return "Fallida";
+        case VP_DOWNLOAD_CANCELED:return "Cancelada"; case VP_DOWNLOAD_PAUSED:return "Pausada";
     }
     return "Desconocido";
 }
-static void empty(const VpUiFrame *f,const char *asset_name,const char *title,const char *message) {
-    card(166,160,628,238,false,accent);
-    icon(asset_name,428,176,104);
-    label(f->font,204,315,552,.94f,ink,title);
-    label(f->font,204,350,552,.62f,muted,message);
+
+static void empty(const VpUiFrame *f,const char *symbol,const char *title,const char *message) {
+    VpUiRect r={180,190,600,230}; glass(r,false,false); icon(symbol,448,211,64);
+    text(f,VP_TYPE_HERO_TITLE,210,321,540,ink,title);
+    vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,210,358,540,2,ink,message);
 }
 
 static void settings(const VpUiFrame *f) {
-    static const char *names[]={"RomM","Temas","Descargas"};
-    static const char *icons[]={"ui_romm","ui_settings","ui_download"};
-    int i;
+    static const char *names[]={"General","Interfaz","Descargas","Conexión (RomM)","Almacenamiento","Acerca de"};
+    static const char *icons[]={"ui_general","ui_interface","ui_download","ui_romm","ui_storage","ui_info"};
+    int i,section=f->settings_section;
+    icon("ui_settings",44,199,54);
+    text(f,VP_TYPE_PAGE_TITLE,104,239,200,ink,"Ajustes");
+    vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,48,280,222,3,C(222,233,255,240),"Personaliza tu experiencia en VitaPlus.");
     if (!f->settings_detail) {
-        static const char *descriptions[]={"Conecta tu biblioteca y sincroniza caratulas","Tu espacio, tus colores","Progreso, errores y reintentos"};
-        for (i=0;i<3;i++) {
-            int y=149+i*84;
-            card(96,y,768,72,f->settings_section==i,accent);
-            icon(icons[i],112,y+7,54);
-            label(f->font,186,y+28,600,.8f,ink,names[i]);
-            label(f->font,186,y+53,600,.56f,muted,descriptions[i]);
+        for (i=0;i<6;i++) {
+            VpUiRect r=vp_ui_settings_row((size_t)i); glass(r,section==i,false);
+            icon(icons[i],r.x+22,r.y+9,32);
+            text(f,VP_TYPE_SETTINGS_ROW,r.x+80,r.y+32,r.w-116,ink,names[i]);
+            vita2d_draw_line(r.x+r.w-28,r.y+18,r.x+r.w-21,r.y+25,ink);
+            vita2d_draw_line(r.x+r.w-21,r.y+25,r.x+r.w-28,r.y+32,ink);
         }
         return;
     }
-    if (f->settings_section==1) {
-        card(78,150,804,248,false,accent);
-        icon("emblem",98,176,128);
-        label(f->font,252,200,584,.92f,ink,"Tu biblioteca, a tu manera");
-        label(f->font,252,239,584,.68f,accent,f->app->theme.name);
-        label(f->font,252,271,584,.56f,muted,f->active_theme);
-        label(f->font,110,336,740,.57f,muted,"Temas: ux0:data/vitaplus/themes/<tema>/theme.ini");
-        label(f->font,110,367,740,.57f,muted,"Cambia active_theme en config.ini. Circulo vuelve.");
-        return;
-    }
-    if (f->settings_section==2) {
+    if (section==2) {
         size_t start=(f->download_selection/4)*4,j;
-        if (!f->downloads->count) { empty(f,"ui_download","Todo al dia","Agrega un juego desde la biblioteca para descargarlo."); return; }
+        if (!f->downloads->count) { empty(f,"ui_download","Todo al día","Agrega un juego desde la biblioteca para descargarlo."); return; }
         for (j=start;j<f->downloads->count && j<start+4;j++) {
-            const VpDownloadEntry *e=&f->downloads->entries[j];
-            int y=145+(int)(j-start)*64;
-            unsigned int state=e->state==VP_DOWNLOAD_FAILED?C(245,166,145,255):accent;
-            char status[48];
-            round_rect(64,y,832,58,10,j==f->download_selection?mix(surface,state,.18f):surface);
-            icon(e->state==VP_DOWNLOAD_COMPLETED?"ui_check":"ui_download",74,y+5,32);
-            label(f->font,120,y+24,480,.75f,ink,e->item.title);
-            (void)snprintf(status,sizeof(status),"%s  %u%%",download_label(e->state),e->percent);
-            label(f->font,668,y+24,214,.75f,state,status);
-            if (e->state==VP_DOWNLOAD_FAILED) label(f->font,120,y+48,748,.75f,muted,e->error);
+            const VpDownloadEntry *e=&f->downloads->entries[j]; VpUiRect r={310,120+(int)(j-start)*76,600,68};
+            char status[64]; glass(r,j==f->download_selection,false);
+            icon(e->state==VP_DOWNLOAD_COMPLETED?"ui_check":"ui_download",r.x+10,r.y+11,28);
+            text(f,VP_TYPE_LIST_TITLE,r.x+48,r.y+24,365,ink,e->item.title);
+            (void)snprintf(status,sizeof(status),"%s %u%%",download_label(e->state),e->percent);
+            text(f,VP_TYPE_STATUS,r.x+414,r.y+24,174,ink,status);
+            if (e->state==VP_DOWNLOAD_FAILED) text(f,VP_TYPE_DESCRIPTION,r.x+48,r.y+49,536,ink,e->error);
             else {
-                round_rect(120,y+42,752,4,2,alpha(ink,35));
-                if (e->percent) round_rect(120,y+42,fmaxf(4,752*fminf((float)e->percent,100)/100),4,2,state);
+                round_rect(r.x+48,r.y+47,536,4,2,C(238,245,255,60));
+                if (e->percent) round_rect(r.x+48,r.y+47,536*fminf(e->percent,100)/100.f,4,2,accent);
             }
         }
-        label(f->font,64,430,832,.52f,muted,"X cancela/reintenta/reanuda; Cuadrado borra; Circulo vuelve");
         return;
     }
-    {
+    if (section==3) {
         const char *titles[]={"URL del servidor","Pair code","Sincronizar ahora","Sincronizar metadata"};
         const char *symbols[]={"ui_home","ui_key","ui_sync","ui_folder"};
         bool pair_enabled=vp_romm_pair_code_enabled(f->romm_state);
-        const char *status="Configura la URL y genera un pair code en RomM.";
-        unsigned int status_color=C(244,199,110,255);
         const char *values[]={f->romm_url[0]?f->romm_url:"X para configurar",
-            pair_enabled?(f->pair_code[0]?"Codigo ingresado; Triangulo para canjear":"X para ingresar el codigo de 8 caracteres"):
-                         (f->romm_state==VP_ROMM_CONNECTED?"Vinculado; no necesitas otro codigo":"Espera a que termine la comprobacion"),
-            "Actualiza el catalogo en segundo plano","Descarga y prepara las caratulas"};
-        switch (f->romm_state) {
-            case VP_ROMM_CONNECTED: status="RomM conectado correctamente."; status_color=C(135,221,164,255); break;
-            case VP_ROMM_CHECKING: status="Comprobando la conexion con RomM..."; status_color=muted; break;
-            case VP_ROMM_INVALID_TOKEN: status="El token ya no funciona. Ingresa un nuevo pair code."; status_color=C(245,166,145,255); break;
-            case VP_ROMM_FORBIDDEN: status="El token no tiene permisos de lectura. Revisa RomM."; status_color=C(245,166,145,255); break;
-            case VP_ROMM_UNREACHABLE: status="No se pudo verificar RomM. Revisa la red y reintenta."; break;
-            default: break;
-        }
+            pair_enabled?(f->pair_code[0]?"Código ingresado; Triángulo para canjear":"X para ingresar el código de 8 caracteres"):
+            (f->romm_state==VP_ROMM_CONNECTED?"Vinculado; no necesitas otro código":"Espera a que termine la comprobación"),
+            "Actualiza el catálogo en segundo plano","Descarga y prepara las imágenes"};
+        const char *status="Configura la URL y genera un pair code en RomM.";
         for (i=0;i<4;i++) {
-            int y=145+i*62;
-            bool disabled=i==1 && !pair_enabled;
-            card(64,y,832,54,!disabled && f->settings_field==i,accent);
-            icon(i==1 && f->romm_state==VP_ROMM_CONNECTED?"ui_check":symbols[i],76,y+5,40);
-            label(f->font,134,y+23,734,.64f,disabled?muted:ink,titles[i]);
-            label(f->font,134,y+44,734,.51f,muted,values[i]);
+            VpUiRect r={310,112+i*72,600,62}; bool disabled=i==1 && !pair_enabled;
+            glass(r,!disabled && f->settings_field==i,false);
+            icon(i==1 && f->romm_state==VP_ROMM_CONNECTED?"ui_check":symbols[i],r.x+12,r.y+13,30);
+            text(f,VP_TYPE_LIST_TITLE,r.x+58,r.y+24,528,ink,titles[i]);
+            text(f,VP_TYPE_DESCRIPTION,r.x+58,r.y+48,528,disabled?muted:ink,values[i]);
         }
-        label(f->font,66,421,828,.54f,status_color,status);
-        label(f->font,66,450,828,.49f,muted,pair_enabled?
-            "X edita/sincroniza | Triangulo canjea/guarda | Circulo vuelve":
-            "X edita URL/sincroniza | Triangulo guarda/sincroniza | Circulo vuelve");
+        switch (f->romm_state) {
+            case VP_ROMM_CONNECTED:status="RomM conectado correctamente.";break;
+            case VP_ROMM_CHECKING:status="Comprobando la conexión con RomM...";break;
+            case VP_ROMM_INVALID_TOKEN:status="El token ya no funciona. Ingresa un nuevo pair code.";break;
+            case VP_ROMM_FORBIDDEN:status="El token no tiene permisos de lectura. Revisa RomM.";break;
+            case VP_ROMM_UNREACHABLE:status="No se pudo verificar RomM. Revisa la red y reintenta.";break;
+            default:break;
+        }
+        vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,316,428,584,2,ink,status);
+        return;
+    }
+    {
+        VpUiRect r={310,148,600,270}; char detail[384]; glass(r,false,false);
+        icon(icons[section],334,168,48);
+        text(f,VP_TYPE_HERO_TITLE,400,203,470,ink,names[section]);
+        if (section==1) {
+            (void)snprintf(detail,sizeof(detail),"Tema: %s\nInter · 960 × 544\nTriángulo cambia la vista de la biblioteca.\nTemas: ux0:data/vitaplus/themes/<tema>/theme.ini",f->app->theme.name);
+        } else if (section==4) {
+            (void)snprintf(detail,sizeof(detail),"Libre: %.1f GiB / %.1f GiB\nDescargas: ux0:data/vitaplus/downloads/\nImágenes: ux0:data/vitaplus/cache/covers/",f->storage_free/1073741824.,f->storage_total/1073741824.);
+        } else if (section==5) {
+            (void)snprintf(detail,sizeof(detail),"VitaPlus · Blueglass\nBiblioteca y launcher para PS Vita / PSTV.\nTipografía Inter por The Inter Project Authors.\nLogos y marcas pertenecen a sus respectivos titulares.");
+        } else {
+            (void)snprintf(detail,sizeof(detail),"%u juegos en tu biblioteca.\nUsa L / R para cambiar de sección.\nDescargas y sincronización en segundo plano.\nSTART pausa las descargas y sale de VitaPlus.",(unsigned)f->app->catalog.count);
+        }
+        vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,338,254,546,7,ink,detail);
     }
 }
 
-static void footer(const VpUiFrame *f,float dt) {
-    static const char *icons[]={"ui_library","ui_store","ui_settings"};
-    static const char *names[]={"Biblioteca","Tiendas","Ajustes"};
-    int i;
-    round_rect(28,480,904,48,18,alpha(surface,245));
-    if (!appearance.motion_ms) dock_x=278+f->app->active_screen*156;
-    else dock_x+=(278+f->app->active_screen*156-dock_x)*fminf(1,dt*14);
-    round_rect(dock_x,485,152,38,13,mix(surface,accent,.16f));
-    label(f->font,46,499,216,.75f,muted,"L / R  secciones");
-    label(f->font,46,521,216,.75f,muted,"START  salir");
-    for (i=0;i<3;i++) {
-        int x=278+i*156;
-        icon(icons[i],x+7,489,30);
-        label(f->font,x+41,509,104,.75f,f->app->active_screen==(VpScreen)i?accent:muted,names[i]);
+/* One small atlas preserves smooth colored outlines at the native footer size. */
+static void button(int kind,int x,int y) {
+    vita2d_texture *texture=asset("ui_buttons");
+    if (texture && kind>=0 && kind<4)
+        vita2d_draw_texture_tint_part_scale(texture,x-12,y-12,(kind%2)*64,(kind/2)*64,64,64,.375f,.375f,0xffffffffu);
+}
+
+static void footer(const VpUiFrame *f) {
+    bool roms=f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_ROMS && f->visible_count;
+    bool downloads=f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_section==2;
+    bool connection=f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_section==3;
+    const char *action=roms?"Descargar":"Abrir";
+    VpUiRect r={24,492,912,42};
+    round_rect(r.x-1,r.y-1,r.w+2,r.h+2,22,C(233,244,255,150));
+    round_rect(r.x,r.y,r.w,r.h,21,C(194,215,255,120));
+    round_rect(43,504,28,19,5,C(225,235,255,210));
+    round_rect(80,504,28,19,5,C(225,235,255,210));
+    text(f,VP_TYPE_FOOTER,50,519,18,C(26,47,91,255),"L");
+    text(f,VP_TYPE_FOOTER,87,519,18,C(26,47,91,255),"R");
+    text(f,VP_TYPE_FOOTER,121,518,210,C(20,40,83,255),"Cambiar sección");
+    vita2d_draw_line(341,502,341,524,C(116,146,206,120));
+    if (roms) {
+        const VpItem *item=&f->app->catalog.items[f->visible[position(f)]];
+        if (item->installed) action="Jugar";
+        else if (item->source==VP_SOURCE_HOMEBREW) action="Instalar";
     }
-    if (f->downloads->count) {
-        char count[24];
-        icon("ui_download",768,490,28);
-        (void)snprintf(count,sizeof(count),"%u en cola",(unsigned)f->downloads->count);
-        label(f->font,803,510,110,.51f,muted,count);
+    if (downloads) action="Cancelar / Reintentar";
+    if (f->app->active_screen==VP_SCREEN_SETTINGS && !f->settings_detail) action="Seleccionar";
+    button(0,366,513); text(f,VP_TYPE_FOOTER,383,518,210,C(12,32,76,255),action);
+    button(1,613,513); text(f,VP_TYPE_FOOTER,630,518,64,C(12,32,76,255),"Volver");
+    if (roms || downloads) {
+        button(2,713,513); text(f,VP_TYPE_FOOTER,730,518,76,C(12,32,76,255),downloads?"Quitar":"Favorito");
+    }
+    if (roms || connection) {
+        button(3,815,513); text(f,VP_TYPE_FOOTER,832,518,102,C(12,32,76,255),connection?"Guardar":"Cambiar vista");
     }
 }
 
 void vp_ui_render(const VpUiFrame *f) {
     unsigned long long now=sceKernelGetProcessTimeWide();
-    float dt=last_frame?(float)(now-last_frame)/1000000:.016f;
     char key[sizeof(focus_key)];
-    char metadata[VP_TEXT+64];
-    const char *title=vp_screen_name(f->app->active_screen);
-    const char *subtitle="Tu proxima aventura empieza aqui";
-    bg=color(f->app->theme.background,C(16,22,36,255));
-    surface=color(f->app->theme.surface,C(34,43,61,255));
-    accent=color(f->app->theme.accent,C(135,221,196,255));
-    ink=color(f->app->theme.text,C(241,243,250,255));
-    muted=color(f->app->theme.muted,C(168,181,201,255));
-    (void)snprintf(key,sizeof(key),"%d:%d:%d:%u:%u:%d:%d:%d",f->app->active_screen,f->app->library_level,f->app->active_view,(unsigned)f->app->selected_platform,(unsigned)f->app->selected_item,f->settings_section,f->settings_field,f->settings_detail);
+    bg=color(f->app->theme.background,C(53,75,124,255));
+    surface=color(f->app->theme.surface,C(141,169,230,255));
+    ink=color(f->app->theme.text,C(250,252,255,255));
+    muted=color(f->app->theme.muted,C(204,220,249,255));
+    accent=color(f->app->theme.accent,C(79,159,255,255));
+    (void)snprintf(key,sizeof(key),"%d:%d:%d:%u:%u:%d:%d:%d",f->app->active_screen,f->app->library_level,f->app->active_view,
+        (unsigned)f->app->selected_platform,(unsigned)f->app->selected_item,f->settings_section,f->settings_field,f->settings_detail);
     if (strcmp(key,focus_key)) { (void)snprintf(focus_key,sizeof(focus_key),"%s",key); focus_at=now; }
-    entrance=appearance.motion_ms?vp_ui_ease((float)(now-focus_at)/((float)appearance.motion_ms*1000)):1;
-    asset_budget=1; last_frame=now;
-    backdrop(f->background);
-    if (f->app->active_screen==VP_SCREEN_LIBRARY) {
-        if (f->app->library_level==VP_LEVEL_ROMS) {
-            title=f->app->active_platform;
-            if (f->visible_count) title=f->app->catalog.items[f->visible[position(f)]].platform_display;
-            subtitle="Biblioteca / Tu coleccion";
-        } else {
-            (void)snprintf(metadata,sizeof(metadata),"%u consolas  /  %u juegos en tu biblioteca",(unsigned)f->group_count,(unsigned)f->app->catalog.count);
-            subtitle=metadata;
-        }
-    } else if (f->app->active_screen==VP_SCREEN_SETTINGS) {
-        subtitle=f->settings_detail?"Ajustes / Configuracion":"Un espacio que se adapta a ti";
-    } else subtitle="Nuevos mundos por descubrir";
-    icon("emblem",25,20,35);
-    label(f->font,66,44,130,.8f,ink,"VitaPlus");
-    label(f->font,220,44,250,.75f,muted,"A U R O R A");
-    round_rect(700,25,232,28,12,alpha(surface,200));
-    label(f->font,714,44,204,.75f,f->busy?accent:muted,f->busy?"Sincronizando...":"Tu espacio de juego");
-    label(f->font,28,94,720,1.05f,ink,title);
-    label(f->font,29,121,770,.57f,muted,subtitle);
+    entrance=appearance.motion_ms?vp_ui_ease((float)(now-focus_at)/(appearance.motion_ms*1000.f)):1;
+    backdrop(f,now); header(f); heading(f);
     if (f->app->active_screen==VP_SCREEN_LIBRARY) {
         if (f->app->library_level==VP_LEVEL_PLATFORMS) {
-            if (!f->group_count) empty(f,"platform_generic","Tu biblioteca te espera","Abre Ajustes / RomM para conectar tu servidor.");
-            else {
-                const VpPlatformGroup *g=&f->groups[f->app->selected_platform];
-                platforms(f);
-                icon("ui_folder",28,429,28);
-                label(f->font,64,449,600,.65f,ink,g->display);
-                label(f->font,700,449,232,.51f,muted,"Flechas navega  /  X abre");
-            }
-        } else if (!f->visible_count) empty(f,"ui_folder","No hay juegos en esta consola","Circulo vuelve a la biblioteca.");
-        else {
-            const VpItem *item=&f->app->catalog.items[f->app->selected_item];
-            const char *view_icon=f->app->active_view==VP_VIEW_GRID?"ui_grid":(f->app->active_view==VP_VIEW_LIST?"ui_list":"ui_carousel");
-            icon(view_icon,802,80,28);
-            label(f->font,838,100,94,.51f,muted,"Triangulo");
-            roms(f);
-            icon(item->installed?"ui_play":"ui_download",28,427,29);
-            label(f->font,66,441,538,.68f,ink,item->title);
-            label(f->font,66,464,600,.49f,muted,item->description[0]?item->description:"Sin descripcion");
-            label(f->font,685,440,247,.52f,accent,item->multi_file?"Varios archivos":(item->installed?"X jugar":"X descargar / instalar"));
-            label(f->font,685,463,247,.75f,muted,"O volver  /  [] favorito");
-        }
+            if (f->group_count) platforms(f);
+            else empty(f,"ui_library","Tu biblioteca te espera","Abre Ajustes / Conexión (RomM) para conectar tu servidor.");
+        } else if (f->visible_count) roms(f);
+        else empty(f,"ui_folder","No hay juegos en esta consola","Círculo vuelve a la biblioteca.");
     } else if (f->app->active_screen==VP_SCREEN_SETTINGS) settings(f);
-    else {
-        empty(f,"ui_store","Proximamente","Estamos preparando un nuevo lugar para descubrir juegos.");
-        label(f->font,204,379,552,.52f,accent,"Tu biblioteca y RomM siguen disponibles con L / R.");
-    }
-    footer(f,dt);
+    else empty(f,"ui_store","Próximamente","Tu biblioteca y RomM siguen disponibles con L / R.");
+    footer(f);
     if (f->notice_id != last_notice_id) {
         last_notice_id=f->notice_id;
-        (void)snprintf(last_notice,sizeof(last_notice),"%s",f->app->notice);
-        notice_at=now;
+        (void)snprintf(last_notice,sizeof(last_notice),"%s",f->app->notice); notice_at=now;
     }
     if (last_notice[0]) {
         float age=(float)(now-notice_at)/1000000;
         if (age < 4) {
-            unsigned int a=(unsigned int)(255*fmaxf(0,fminf(1,(4-age)*2)));
-            round_rect(636,64,296,54,14,alpha(mix(surface,bg,.42f),a));
-            icon("ui_sync",646,76,26);
-            two_line_label(f->font,680,86,240,alpha(ink,a),last_notice);
+            unsigned int a=(unsigned int)(235*fmaxf(0,fminf(1,(4-age)*2)));
+            round_rect(636,64,296,54,14,C(29,52,104,a));
+            vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,648,85,272,2,alpha(ink,a),last_notice);
         }
     }
 }
 
 void vp_ui_shutdown(void) {
     size_t i;
-    vita2d_wait_rendering_done();
+    vita2d_wait_rendering_done(); vp_ui_backdrop_shutdown();
     for (i=0;i<sizeof(assets)/sizeof(assets[0]);i++) {
         if (assets[i].texture) vita2d_free_texture(assets[i].texture);
         assets[i].texture=NULL; assets[i].attempted=false;
     }
+    focus_key[0]=last_notice[0]='\0'; last_notice_id=0;
 }

@@ -106,6 +106,11 @@ func (service *handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		http.Error(writer, "requested output is too large", http.StatusBadRequest)
 		return
 	}
+	mode := request.URL.Query().Get("mode")
+	if mode != "" && mode != "cover" && mode != "contain" {
+		http.Error(writer, "mode must be cover or contain", http.StatusBadRequest)
+		return
+	}
 
 	source, err := service.decodeImage(request.Body)
 	if err != nil {
@@ -114,7 +119,13 @@ func (service *handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	writer.Header().Set("Content-Type", "image/png")
 	writer.Header().Set("Cache-Control", "public, max-age=86400")
-	if err := png.Encode(writer, centerCropAndScale(source, width, height)); err != nil {
+	output := image.Image(nil)
+	if mode == "contain" {
+		output = containAndScale(source, width, height)
+	} else {
+		output = centerCropAndScale(source, width, height)
+	}
+	if err := png.Encode(writer, output); err != nil {
 		service.logger.Printf("encode image: %v", err)
 		return
 	}
@@ -189,6 +200,21 @@ func centerCropAndScale(source image.Image, targetWidth, targetHeight int) *imag
 
 	destination := image.NewNRGBA(image.Rect(0, 0, targetWidth, targetHeight))
 	draw.CatmullRom.Scale(destination, destination.Bounds(), source, crop, draw.Over, nil)
+	return destination
+}
+
+// Return the source aspect ratio inside the requested bounds. The renderer fits
+// these real dimensions into its cards without baked bars or cropped box art.
+func containAndScale(source image.Image, maxWidth, maxHeight int) *image.NRGBA {
+	bounds := source.Bounds()
+	width, height := maxWidth, maxHeight
+	if int64(bounds.Dx())*int64(maxHeight) > int64(bounds.Dy())*int64(maxWidth) {
+		height = max(1, bounds.Dy()*maxWidth/bounds.Dx())
+	} else {
+		width = max(1, bounds.Dx()*maxHeight/bounds.Dy())
+	}
+	destination := image.NewNRGBA(image.Rect(0, 0, width, height))
+	draw.CatmullRom.Scale(destination, destination.Bounds(), source, bounds, draw.Src, nil)
 	return destination
 }
 

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+<defs>
+ <radialGradient id="face" cx="35%" cy="17%" r="86%">
+  <stop stop-color="#454b56"/><stop offset=".5" stop-color="#242830"/><stop offset="1" stop-color="#11141b"/>
+ </radialGradient>
+ <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+  <stop stop-color="#7b8491"/><stop offset=".48" stop-color="#343a46"/><stop offset="1" stop-color="#0c1017"/>
+ </linearGradient>
+ <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+  <stop stop-color="white" stop-opacity=".16"/><stop offset="1" stop-color="white" stop-opacity="0"/>
+ </linearGradient>
+ <clipPath id="cap"><circle cx="32" cy="31" r="27"/></clipPath>
+</defs>
+<ellipse cx="32" cy="34" rx="28.5" ry="28" fill="#10172a" opacity=".22"/>
+<circle cx="32" cy="31" r="28.5" fill="url(#rim)"/>
+<circle cx="32" cy="31" r="26.5" fill="url(#face)" stroke="#0f131b" stroke-width="1"/>
+<ellipse cx="27" cy="12" rx="29" ry="22" fill="url(#shine)" clip-path="url(#cap)"/>
+<g fill="none" stroke="#64d3c1" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"><path d="m32 12 17.32 30H14.68z"/></g>
+</svg>

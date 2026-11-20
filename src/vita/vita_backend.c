@@ -449,8 +449,8 @@ bool vp_vita_transfer_with_progress(const char *url, const char *bearer_token,
     return installed;
 }
 
-bool vp_vita_transform_cover(const char *source_url, const char *bearer_token,
-                             const char *service_url, const char *destination, void *context) {
+static bool transform_image(const char *source_url, const char *bearer_token,
+                             const char *service_url, const char *destination, bool background) {
     CURL *curl = NULL;
     struct curl_slist *headers = NULL;
     LimitedDownloadFile source = {-1, 0, VP_COVER_SOURCE_LIMIT, false};
@@ -463,7 +463,6 @@ bool vp_vita_transform_cover(const char *source_url, const char *bearer_token,
     char authorization[VP_TEXT + 32];
     char endpoint[VP_URL + 64];
     const char *separator;
-    (void)context;
     if (source_url == NULL || service_url == NULL || destination == NULL ||
         !valid_bearer_token(bearer_token) ||
         !vp_url_escape(source_url, transfer_url, sizeof(transfer_url))) return false;
@@ -506,7 +505,8 @@ bool vp_vita_transform_cover(const char *source_url, const char *bearer_token,
     }
 
     separator = strchr(service_url, '?') != NULL ? "&" : "?";
-    if (snprintf(endpoint, sizeof(endpoint), "%s%swidth=256&height=320", service_url, separator) >=
+    if (snprintf(endpoint, sizeof(endpoint), "%s%swidth=%u&height=%u&mode=%s", service_url, separator,
+                 background?480U:256U,background?272U:320U,background?"cover":"contain") >=
             (int)sizeof(endpoint) ||
         !vp_url_escape(endpoint, transform_url, sizeof(transform_url)) ||
         sceIoGetstat(VP_COVER_SOURCE_PATH, &source_stat) < 0 || source_stat.st_size <= 0 ||
@@ -547,6 +547,18 @@ finish:
     (void)sceIoRemove(VP_COVER_SOURCE_PATH);
     if (!downloaded) (void)sceIoRemove(destination);
     return downloaded;
+}
+
+bool vp_vita_transform_cover(const char *source_url,const char *bearer_token,
+                             const char *service_url,const char *destination,void *context) {
+    (void)context;
+    return transform_image(source_url,bearer_token,service_url,destination,false);
+}
+
+bool vp_vita_transform_background(const char *source_url,const char *bearer_token,
+                                  const char *service_url,const char *destination,void *context) {
+    (void)context;
+    return transform_image(source_url,bearer_token,service_url,destination,true);
 }
 
 bool vp_vita_launch_uri(const char *uri) {

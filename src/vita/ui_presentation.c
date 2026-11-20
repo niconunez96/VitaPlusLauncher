@@ -17,7 +17,7 @@ const VpUiPlatform *vp_ui_platform(const char *slug) {
     static const struct { const char *slug; VpUiPlatform style; } styles[] = {
         {"nes", {"platform_nes", 0xec8c82}}, {"famicom", {"platform_famicom", 0xe6aa79}},
         {"snes", {"platform_snes", 0xab9def}}, {"gb", {"platform_gameboy", 0xa8c98d}},
-        {"gameboy", {"platform_gameboy", 0xa8c98d}}, {"gbc", {"platform_gameboy", 0xa8c98d}},
+        {"gameboy", {"platform_gameboy", 0xa8c98d}}, {"gbc", {"platform_gameboycolor", 0xa8c98d}},
         {"gba", {"platform_gba", 0xb499ee}}, {"nds", {"platform_nds", 0x96c9e2}},
         {"ds", {"platform_nds", 0x96c9e2}},
         {"dreamcast", {"platform_dreamcast", 0xe6aa79}}, {"dc", {"platform_dreamcast", 0xe6aa79}},
@@ -36,7 +36,7 @@ const VpUiPlatform *vp_ui_platform(const char *slug) {
         {"psp", {"platform_psp", 0x9eaee8}},
         {"ps vita", {"platform_vita", 0x86daca}}, {"vita", {"platform_vita", 0x86daca}},
         {"psvita", {"platform_vita", 0x86daca}}, {"arcade", {"platform_arcade", 0xe7b883}},
-        {"neogeo", {"platform_arcade", 0xe7b883}}, {"pce", {"platform_pce", 0xe9b499}},
+        {"neogeo", {"platform_neogeo", 0xe7b883}}, {"pce", {"platform_pce", 0xe9b499}},
         {"pc-engine", {"platform_pce", 0xe9b499}}, {"turbografx-16", {"platform_pce", 0xe9b499}},
         {"atari2600", {"platform_atari2600", 0xdea571}}, {"wonderswan", {"platform_wonderswan", 0x9dcbd8}},
         {"homebrew", {"platform_homebrew", 0x9cdab3}}
@@ -48,14 +48,86 @@ const VpUiPlatform *vp_ui_platform(const char *slug) {
     return &fallback;
 }
 
+const char *vp_ui_platform_label(const char *slug) {
+    static const struct { const char *asset,*label; } labels[]={
+        {"platform_psx","PS1"},{"platform_ps2","PS2"},{"platform_psp","PSP"},{"platform_vita","Vita"},
+        {"platform_nes","NES"},{"platform_famicom","FC"},{"platform_snes","SNES"},
+        {"platform_gameboy","GB"},{"platform_gameboycolor","GBC"},{"platform_gba","GBA"},
+        {"platform_nds","DS"},{"platform_n3ds","3DS"},{"platform_gamecube","GC"},{"platform_wii","Wii"},
+        {"platform_dreamcast","DC"},{"platform_genesis","MD"},{"platform_mastersystem","MS"},
+        {"platform_gamegear","GG"},{"platform_neogeo","Neo Geo"},{"platform_pce","PCE"}
+    };
+    const char *asset=vp_ui_platform(slug)->asset;
+    size_t i;
+    for (i=0;i<sizeof(labels)/sizeof(labels[0]);i++) if (!strcmp(asset,labels[i].asset)) return labels[i].label;
+    return "ROM";
+}
+
 VpUiRect vp_ui_tile(size_t slot) {
-    VpUiRect r = { 28 + (int)(slot % 4) * 230, 146 + (int)((slot % 8) / 4) * 134, 214, 122 };
+    VpUiRect r = {48 + (int)(slot % 5) * 176, 158 + (int)(slot / 5) * 160, 160, 146};
     return r;
+}
+
+VpUiRect vp_ui_console_tile(size_t slot) {
+    VpUiRect r = {44 + (int)slot * 110, 280, 102, 142};
+    return r;
+}
+
+VpUiRect vp_ui_list_row(size_t slot) {
+    VpUiRect r = {64, 170 + (int)slot * 54, 284, 48};
+    return r;
+}
+
+VpUiRect vp_ui_carousel_tile(int offset) {
+    VpUiRect r;
+    if (!offset) { r = (VpUiRect){370, 150, 220, 246}; return r; }
+    r = (VpUiRect){offset < 0 ? 228 + (offset+1)*132 : 604 + (offset-1)*132, 190, 122, 168};
+    return r;
+}
+
+VpUiRect vp_ui_settings_row(size_t slot) {
+    VpUiRect r = {310, 108 + (int)slot * 60, 418, 50};
+    return r;
+}
+
+static bool inside(VpUiRect r, int x, int y) {
+    return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h;
+}
+
+size_t vp_ui_console_start(size_t selected, size_t total) {
+    size_t start = selected > 4 ? selected-4 : 0;
+    size_t last = total > VP_UI_CONSOLE_PAGE ? total-VP_UI_CONSOLE_PAGE : 0;
+    return start > last ? last : start;
+}
+
+size_t vp_ui_page_size(int view) {
+    return view == 0 ? VP_UI_GRID_PAGE : (view == 1 ? VP_UI_LIST_PAGE : VP_UI_CAROUSEL_PAGE);
+}
+
+int vp_ui_touch_console_slot(int x, int y) {
+    size_t slot;
+    for (slot=0; slot<VP_UI_CONSOLE_PAGE; slot++)
+        if (inside(vp_ui_console_tile(slot),x,y)) return (int)slot;
+    return -1;
+}
+
+int vp_ui_touch_carousel_offset(int x, int y) {
+    int offset;
+    if (inside(vp_ui_carousel_tile(0),x,y)) return 0;
+    for (offset=-3; offset<=3; offset++)
+        if (offset && inside(vp_ui_carousel_tile(offset),x,y)) return offset;
+    return 99;
+}
+
+int vp_ui_touch_settings_slot(int x, int y) {
+    size_t slot;
+    for (slot=0; slot<6; slot++) if (inside(vp_ui_settings_row(slot),x,y)) return (int)slot;
+    return -1;
 }
 
 int vp_ui_touch_tile_slot(int x, int y) {
     size_t slot;
-    for (slot = 0; slot < 8; slot++) {
+    for (slot = 0; slot < VP_UI_GRID_PAGE; slot++) {
         VpUiRect r = vp_ui_tile(slot);
         if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return (int)slot;
     }
@@ -64,25 +136,22 @@ int vp_ui_touch_tile_slot(int x, int y) {
 
 int vp_ui_touch_list_slot(int x, int y) {
     int slot;
-    if (x < 28 || x >= 932) return -1;
-    for (slot = 0; slot < 6; slot++) {
-        int row_y = 146 + slot * 43;
-        if (y >= row_y && y < row_y + 39) return slot;
-    }
+    for (slot = 0; slot < VP_UI_LIST_PAGE; slot++)
+        if (inside(vp_ui_list_row((size_t)slot),x,y)) return slot;
     return -1;
 }
 
 int vp_ui_touch_dock_screen(int x, int y) {
-    if (y < 480 || y >= 528 || x < 278 || x >= 746) return -1;
-    return (x - 278) / 156;
+    if (y < 14 || y >= 56 || x < 254 || x >= 638) return -1;
+    return x<402?0:(x<514?1:2);
 }
 
 bool vp_ui_touch_view_toggle(int x, int y) {
-    return x >= 802 && x < 932 && y >= 76 && y < 112;
+    return x >= 804 && x < 936 && y >= 492 && y < 534;
 }
 
 bool vp_ui_touch_back(int x, int y) {
-    return x >= 685 && x < 932 && y >= 421 && y < 472;
+    return x >= 600 && x < 696 && y >= 492 && y < 534;
 }
 
 float vp_ui_ease(float p) {

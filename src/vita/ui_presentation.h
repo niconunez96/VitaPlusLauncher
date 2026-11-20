@@ -7,8 +7,22 @@
 typedef struct { int x, y, w, h; } VpUiRect;
 typedef struct { const char *asset; uint32_t rgb; } VpUiPlatform;
 typedef struct { int motion_ms, radius, wallpaper_alpha; } VpUiAppearance;
+#define VP_UI_GRID_PAGE 10
+#define VP_UI_LIST_PAGE 5
+#define VP_UI_CONSOLE_PAGE 8
+#define VP_UI_CAROUSEL_PAGE 7
 const VpUiPlatform *vp_ui_platform(const char *slug);
+const char *vp_ui_platform_label(const char *slug);
 VpUiRect vp_ui_tile(size_t slot);
+VpUiRect vp_ui_console_tile(size_t slot);
+VpUiRect vp_ui_list_row(size_t slot);
+VpUiRect vp_ui_carousel_tile(int offset);
+VpUiRect vp_ui_settings_row(size_t slot);
+int vp_ui_touch_console_slot(int x, int y);
+int vp_ui_touch_carousel_offset(int x, int y);
+int vp_ui_touch_settings_slot(int x, int y);
+size_t vp_ui_console_start(size_t selected, size_t total);
+size_t vp_ui_page_size(int view);
 int vp_ui_touch_tile_slot(int x, int y);
 int vp_ui_touch_list_slot(int x, int y);
 int vp_ui_touch_dock_screen(int x, int y);

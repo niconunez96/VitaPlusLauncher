@@ -2,7 +2,7 @@
 
 VitaPlus es una shell/launcher homebrew para PS Vita/PSTV: reúne biblioteca local, catálogo personal de RomM y tiendas de homebrew en una interfaz navegable con temas y vistas intercambiables.
 
-> Estado: núcleo portable y frontend Vita2D implementados. La interfaz Aurora incluye assets originales, navegación por consola y descargas en segundo plano. Compilación VPK con VitaSDK/Docker; las comprobaciones visuales en hardware siguen siendo necesarias.
+> Estado: núcleo portable y frontend Vita2D implementados. La interfaz Blueglass incorpora Inter, logos de plataformas, fondos por consola y descargas en segundo plano. Compilación VPK con VitaSDK/Docker; las comprobaciones visuales y de rendimiento en hardware siguen siendo necesarias.
 
 ## Alcance
 
@@ -19,9 +19,10 @@ La tienda oficial de PlayStation queda como acceso delegado a la aplicación ofi
 ```text
 include/                 API portable del núcleo
 src/core/                modelo, catálogo, temas, providers y transferencias
-src/vita/                frontend Vita2D y presentación Aurora
+src/vita/                frontend Vita2D y presentación Blueglass
 themes/default/          tema base editable
-assets/aurora/           artwork activo agrupado (console_icons/, ui_icons/, wallpaper/emblem, licencias/previews)
+assets/blueglass/        logos, fondos, Inter, símbolos gráficos y atribución del tema activo
+assets/aurora/           artwork de la presentación anterior
 assets/legacy/           inventario original y provenance.tsv histórico
 tests/                   pruebas host con gcc
 docs/                    arquitectura y contrato de providers
@@ -54,11 +55,11 @@ cmake --build build/vita
 
 El VPK queda en `build/vita/vitaplus.vpk`.
 
-La interfaz usa la fuente **PGF del sistema**, en la pantalla nativa de 960×544.
+La interfaz usa **Inter** en pesos 400, 500, 600 y 700, en la pantalla nativa de 960×544.
 
-## Interfaz Aurora
+## Interfaz Blueglass
 
-Aurora mantiene la estructura núcleo/proveedores/frontend y los controles existentes:
+Blueglass mantiene la estructura núcleo/proveedores/frontend y los controles existentes:
 flechas para navegar, `X` para abrir/descargar/jugar, círculo para volver, `L/R` para
 cambiar de sección, triángulo para cambiar de vista y cuadrado para favoritos. La pantalla
 táctil frontal permite tocar las tarjetas, filas, dock, selector de vista y el área de volver:
@@ -66,19 +67,21 @@ el primer toque selecciona y el segundo confirma acciones potencialmente costosa
 jugar o instalar).
 En Ajustes, triángulo conserva la acción de canjear y guardar el código de RomM.
 
-- Biblioteca con iconos de controles por consola, colores propios y foco animado.
-- Vistas de juegos `grid`, `list` y `carousel`, fondo con artwork y carátulas de RomM.
-- Dock de secciones, ajustes visuales, progreso de descargas y avisos temporales.
-- 42 PNG incluidos: controles cuadrados para las 12 plataformas solicitadas, símbolos de sistema renovados y el círculo oficial de RomM; funcionan sin conexión y tienen fallback.
-- Texto con escala mínima de 0.75, títulos en dos líneas y más espacio en el dock y las descargas. Las pistas `O` y `[]` representan círculo y cuadrado.
+- Biblioteca con carrusel horizontal de logos originales y fondo de la consola seleccionada.
+- Carrusel de juegos con portada central, lista de cinco filas con detalles y mosaico de 5×2 carátulas.
+- Navegación superior, fecha/hora/batería reales y barra inferior de botones gráficos con ayudas contextuales.
+- 25 identidades de plataforma, 26 fondos y símbolos de interfaz disponibles sin conexión; fuentes y atribuciones incluidas.
+- Tipografía compartida con tamaños de 14–30 px y truncado UTF-8; foco azul luminoso y superficies translúcidas.
+- Ajustes: General, Interfaz, Descargas, Conexión (RomM), Almacenamiento y Acerca de. General e Interfaz muestran información y la configuración actual; RomM y Descargas conservan sus acciones.
 
-Los temas anteriores siguen usando sus cinco colores y su vista inicial. Las opciones
-adicionales son `ui_motion_ms` (0–600, 0 desactiva el movimiento), `ui_radius` (6–20)
-y `ui_wallpaper_alpha` (0–255). Los valores inválidos se ignoran. `card_width` y
-`card_height` se conservan por compatibilidad; la grilla usa geometría fija de 4×2
-para mantener la navegación. No se agregaron funciones de búsqueda ni una tienda funcional.
+Los temas conservan sus colores y su vista inicial. `ui_motion_ms=0` desactiva el
+movimiento; `ui_wallpaper_alpha` controla la opacidad del fondo. `ui_radius`,
+`card_width` y `card_height` se siguen leyendo por compatibilidad; Blueglass usa
+geometría fija compartida entre render y controles. La tienda continúa mostrando
+su pantalla «Próximamente».
 
-Preparación de assets, pruebas y verificación visual: [docs/aurora-ui.md](docs/aurora-ui.md).
+Preparación de assets, actualización del proxy, pruebas y verificación visual:
+[docs/blueglass-ui.md](docs/blueglass-ui.md).
 
 ## Configuración en Vita
 

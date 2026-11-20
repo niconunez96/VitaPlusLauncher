@@ -787,6 +787,25 @@ static void test_download_queue(void) {
     assert(!vp_download_queue_remove(&queue, "romm:queue-2"));
 }
 
+static void test_romm_game_artwork(void) {
+    static VpCatalog catalog;
+    VpRommConfig config={0};
+    FetchLog log={0};
+    VpFetchBackend backend={fake_fetch,&log};
+    (void)snprintf(config.base_url,sizeof(config.base_url),"https://romm.example.test");
+    (void)snprintf(config.token,sizeof(config.token),"test-token");
+    log.payload="{\"total\":3,\"items\":["
+        "{\"id\":1,\"name\":\"With artwork\",\"platform_slug\":\"psx\",\"merged_screenshots\":[\"/assets/romm/resources/roms/1/hero.png\"]},"
+        "{\"id\":2,\"name\":\"No artwork\",\"platform_slug\":\"psx\",\"merged_screenshots\":[]},"
+        "{\"id\":3,\"name\":\"Invalid artwork\",\"platform_slug\":\"psx\",\"background_url\":\"null\"}]}";
+    vp_catalog_init(&catalog);
+    assert(vp_romm_sync(&catalog,&config,backend));
+    assert(catalog.count==3);
+    assert(strcmp(catalog.items[0].background_url,"https://romm.example.test/assets/romm/resources/roms/1/hero.png")==0);
+    assert(!catalog.items[1].background_url[0]);
+    assert(!catalog.items[2].background_url[0]);
+}
+
 int main(void) {
     VpItem sample = make_item("local:sample", "Sample");
     assert(strcmp(sample.title, "Sample") == 0);
@@ -803,6 +822,7 @@ int main(void) {
     test_romm_pair_code_exchange();
     test_romm_connection();
     test_romm_sync();
+    test_romm_game_artwork();
     test_libretro_thumbnail_safety();
     test_romm_pagination();
     test_romm_sync_fails_after_partial_page();

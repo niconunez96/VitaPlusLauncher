@@ -36,6 +36,50 @@ func TestImageReturnsCenterCroppedPNG(t *testing.T) {
 	}
 }
 
+func TestContainPreservesTheEntireCover(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name                                 string
+		width, height, wantWidth, wantHeight int
+	}{
+		{"square", 200, 200, 256, 256},
+		{"portrait", 200, 400, 160, 320},
+		{"landscape", 400, 200, 256, 128},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/image?width=256&height=320&mode=contain", sourcePNG(t, test.width, test.height))
+			response := httptest.NewRecorder()
+			NewHandler(Config{}).ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d", response.Code)
+			}
+			result, err := png.Decode(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Bounds().Dx() != test.wantWidth || result.Bounds().Dy() != test.wantHeight {
+				t.Fatalf("bounds = %v, want %dx%d", result.Bounds(), test.wantWidth, test.wantHeight)
+			}
+			// Blue marks every source pixel, including both previously cropped edges.
+			for _, p := range []image.Point{{0, 0}, {test.wantWidth - 1, test.wantHeight - 1}} {
+				pixel := color.NRGBAModel.Convert(result.At(p.X, p.Y)).(color.NRGBA)
+				if pixel.B != 100 || pixel.A != 255 {
+					t.Fatalf("source edge lost at %v: %v", p, pixel)
+				}
+			}
+		})
+	}
+}
+
+func TestImageRejectsUnknownFitMode(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/image?width=100&height=100&mode=stretch", nil)
+	response := httptest.NewRecorder()
+	NewHandler(Config{}).ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d", response.Code)
+	}
+}
+
 func TestImageRejectsNonPOSTRequests(t *testing.T) {
 	t.Parallel()
 

@@ -1,0 +1,33 @@
+{
+  "model": "flux3_image",
+  "resolution": "1k",
+  "aspect_ratio": "16:9",
+  "ready": {
+    "general": "e73bc3d3-d9ba-4857-8ccd-7bd982901b40",
+    "famicom": "284dc3a8-63a3-41c5-a03f-c68e85aab808",
+    "snes": "6b33cade-2b17-4944-a170-45c7e32afb49",
+    "gameboy": "c499a3d4-175a-4975-a449-3da3ee9677a8",
+    "gba": "0c183cd8-4fb7-415f-b712-17872cf5ed92",
+    "nds": "8faf0f63-4956-4a88-ba49-187a4adc8511",
+    "genesis": "04ebfa83-14d3-461a-9610-b75c4cf8ed8b",
+    "mastersystem": "5dbd3f94-b3f4-4e43-a58b-00cea7b3391c",
+    "gamegear": "f770f783-a5d1-49e3-b13e-77cc18076979",
+    "psp": "97f571c0-0010-4488-9024-3ae77b635941",
+    "vita": "6191fcb2-702e-40a5-93ee-adba6bb6970b",
+    "arcade": "47652acb-efaa-41bc-b242-889d58a15a39",
+    "pce": "70f6888c-3aab-476a-a5a7-0a4e6be2ad3a",
+    "atari2600": "1abeccbf-f18d-486a-8be4-a8cb41293601",
+    "wii": "1b7812b5-d9a8-473a-b65c-dba23be45d65",
+    "gameboycolor": "a825a36a-2ee4-4b64-826b-142e8d6c656f"
+  },
+  "moderated_input": {
+    "psx": "72b1571e-7f5f-4928-996f-3add75b8021b",
+    "nes": "492e8230-a1d2-4121-a758-006b449ed828",
+    "wonderswan": "60dedd6a-53e4-44c0-8d80-c2c69b725291",
+    "dreamcast": "8ef0183c-cd9b-40dd-8f51-8115ade19417",
+    "n3ds": "3cdbc0b0-6c1f-46e3-b7c0-07e1d72e990f",
+    "gamecube": "121cb30b-14a8-4a11-aafa-e1dd7935d9a0",
+    "ps2": "9653fdd4-4e9f-4512-b19f-97f99d3f85bd",
+    "neogeo": "7750cdbe-1d8d-4457-8d04-e0a3b4548d74"
+  }
+}

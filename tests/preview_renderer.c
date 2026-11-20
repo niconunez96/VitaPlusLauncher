@@ -1,51 +1,49 @@
-/* Headless layout smoke test. Cairo approximates PGF text; this is not Vita GPU proof. */
+/* Native-sized layout probe using the actual Inter files via Cairo/FreeType.
+ * GPU blending, texture caches and device frame timing still need a real Vita. */
+#define _POSIX_C_SOURCE 200809L
 #include "ui_renderer.h"
+#include "ui_backdrop.h"
 #include <psp2/io/fcntl.h>
 #include <cairo.h>
+#include <cairo-ft.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static cairo_t *cr;
+static FT_Library freetype;
 static unsigned long long clock_us=1000000;
-static int missing;
-static size_t texture_count;
-static unsigned int loaded;
-static int probe_width=-1;
-static char drawn_text[VP_URL+4];
-static int selected_seen, row_count, line_one, line_two;
-static char expected_title[64];
-static const char *expected_status;
-static const vita2d_texture *check_texture;
-static int status_seen, pair_hint_seen, check_seen;
-void vp_ui_test_label(vita2d_pgf *font,int width,const char *value);
+static size_t textures,fonts,drawn;
+static bool missing;
+static char last_text[768];
+static _Alignas(16) unsigned char pool[1024*1024];
+static size_t pool_used;
+static void source(unsigned int c);
 
-/* Mirror grouped source artwork while preserving the flat app0 runtime path. */
-static const char *asset_source(const char *path) {
-    static char candidate[256];
-    const char *base=path+5;
-    const char *name;
-    FILE *file;
-    if (strncmp(base,"assets/aurora/",14)!=0) return base;
-    name=base+14;
-    if (strncmp(name,"platform_",9)==0)
-        snprintf(candidate,sizeof(candidate),"assets/aurora/console_icons/%s",name);
-    else if (strncmp(name,"ui_",3)==0)
-        snprintf(candidate,sizeof(candidate),"assets/aurora/ui_icons/%s",name);
-    else
-        snprintf(candidate,sizeof(candidate),"assets/aurora/%s",name);
-    file=fopen(candidate,"rb");
-    if (!file) return base;
-    fclose(file); return candidate;
+void *vita2d_pool_memalign(unsigned int size,unsigned int alignment) {
+    size_t start=(pool_used+alignment-1)&~((size_t)alignment-1);
+    assert(start+size<=sizeof(pool)); pool_used=start+size; return pool+start;
+}
+void vita2d_draw_array(int mode,const vita2d_color_vertex *v,size_t count) {
+    size_t i;
+    assert(mode==SCE_GXM_PRIMITIVE_TRIANGLE_FAN && count>=3);
+    source(v[0].color);
+    cairo_move_to(cr,v[1].x,v[1].y);
+    for (i=2;i<count;i++) cairo_line_to(cr,v[i].x,v[i].y);
+    cairo_close_path(cr); cairo_fill(cr);
 }
 
+static const char *local(const char *path) { return !strncmp(path,"app0:",5)?path+5:path; }
 static void source(unsigned int c) {
     cairo_set_source_rgba(cr,(c&255)/255.,((c>>8)&255)/255.,((c>>16)&255)/255.,(c>>24)/255.);
 }
 void vita2d_draw_rectangle(float x,float y,float w,float h,unsigned int c) {
-    assert(isfinite(x) && isfinite(y) && w>=0 && h>=0);
+    assert(isfinite(x)&&isfinite(y)&&w>=0&&h>=0);
     source(c); cairo_rectangle(cr,x,y,w,h); cairo_fill(cr);
 }
 void vita2d_draw_fill_circle(float x,float y,float r,unsigned int c) {
@@ -54,214 +52,163 @@ void vita2d_draw_fill_circle(float x,float y,float r,unsigned int c) {
 void vita2d_draw_line(float x,float y,float xx,float yy,unsigned int c) {
     source(c); cairo_set_line_width(cr,1); cairo_move_to(cr,x,y); cairo_line_to(cr,xx,yy); cairo_stroke(cr);
 }
-void vita2d_draw_texture_tint_scale(const vita2d_texture *t,float x,float y,float sx,float sy,unsigned int tint) {
-    assert(t && t->surface && sx>0 && sy>0);
-    if (t==check_texture && x==76 && y==212) check_seen++;
-    cairo_save(cr); cairo_translate(cr,x,y); cairo_scale(cr,sx,sy);
-    cairo_set_source_surface(cr,t->surface,0,0);
+static void sync_texture(const vita2d_texture *t) {
+    if (t->raw==1) {
+        /* CPU upload is RGBA on Vita; Cairo's image surface is native ARGB. */
+        unsigned char *bytes=cairo_image_surface_get_data(t->surface);
+        int stride=cairo_image_surface_get_stride(t->surface),x,y;
+        for (y=0;y<t->h;y++) for (x=0;x<t->w;x++) {
+            unsigned char *p=bytes+y*stride+x*4,red=p[0]; p[0]=p[2]; p[2]=red;
+        }
+        ((vita2d_texture *)t)->raw=2;
+        cairo_surface_mark_dirty(t->surface);
+    }
+}
+void vita2d_draw_texture_tint_part_scale(const vita2d_texture *t,float x,float y,float tx,float ty,float w,float h,float sx,float sy,unsigned int tint) {
+    assert(t&&t->surface&&sx>0&&sy>0);
+    sync_texture(t);
+    cairo_save(cr); cairo_rectangle(cr,x,y,w*sx,h*sy); cairo_clip(cr);
+    cairo_translate(cr,x,y); cairo_scale(cr,sx,sy);
+    cairo_set_source_surface(cr,t->surface,-tx,-ty);
     cairo_paint_with_alpha(cr,(tint>>24)/255.); cairo_restore(cr);
+}
+void vita2d_draw_texture_tint_scale(const vita2d_texture *t,float x,float y,float sx,float sy,unsigned int tint) {
+    vita2d_draw_texture_tint_part_scale(t,x,y,0,0,(float)t->w,(float)t->h,sx,sy,tint);
 }
 unsigned int vita2d_texture_get_width(const vita2d_texture *t) { return (unsigned)t->w; }
 unsigned int vita2d_texture_get_height(const vita2d_texture *t) { return (unsigned)t->h; }
 vita2d_texture *vita2d_load_PNG_file(const char *path) {
-    static const char *expected[]={"platform_arcade","platform_dreamcast","platform_gba","platform_n3ds",
-        "platform_nds","platform_gamecube","platform_psx","platform_ps2","platform_psp",
-        "platform_genesis","platform_snes","platform_wii","ui_romm"};
-    size_t i;
-    vita2d_texture *t=calloc(1,sizeof(*t)); assert(t);
-    if (strstr(path,"ui_check.png")) check_texture=t;
-    for (i=0;i<sizeof(expected)/sizeof(expected[0]);i++) if (strstr(path,expected[i])) loaded|=1u<<i;
-    t->surface=cairo_image_surface_create_from_png(asset_source(path));
-    assert(cairo_surface_status(t->surface)==CAIRO_STATUS_SUCCESS);
+    vita2d_texture *t;
+    if (missing) return NULL;
+    t=calloc(1,sizeof(*t)); assert(t);
+    t->surface=cairo_image_surface_create_from_png(local(path));
+    if (cairo_surface_status(t->surface)!=CAIRO_STATUS_SUCCESS) { cairo_surface_destroy(t->surface); free(t); return NULL; }
     t->w=cairo_image_surface_get_width(t->surface); t->h=cairo_image_surface_get_height(t->surface);
-    texture_count++; return t;
+    textures++; return t;
 }
+vita2d_texture *vita2d_create_empty_texture(unsigned int w,unsigned int h) {
+    vita2d_texture *t=calloc(1,sizeof(*t)); assert(t);
+    t->surface=cairo_image_surface_create(CAIRO_FORMAT_ARGB32,(int)w,(int)h);
+    t->w=(int)w; t->h=(int)h; t->raw=1; textures++; return t;
+}
+unsigned int vita2d_texture_get_stride(const vita2d_texture *t) { return (unsigned)cairo_image_surface_get_stride(t->surface); }
+void *vita2d_texture_get_datap(const vita2d_texture *t) { return cairo_image_surface_get_data(t->surface); }
 void vita2d_texture_set_filters(vita2d_texture *t,int a,int b) { (void)t;(void)a;(void)b; }
-void vita2d_free_texture(vita2d_texture *t) { cairo_surface_destroy(t->surface); free(t); texture_count--; }
+void vita2d_free_texture(vita2d_texture *t) { cairo_surface_destroy(t->surface); free(t); textures--; }
 void vita2d_wait_rendering_done(void) {}
-SceUID sceIoOpen(const char *path,int flags,int mode) {
-    (void)mode; return missing?-1:open(asset_source(path),flags);
-}
+SceUID sceIoOpen(const char *path,int flags,int mode) { (void)mode; return missing?-1:open(local(path),flags); }
 unsigned long long sceKernelGetProcessTimeWide(void) { clock_us+=16667; return clock_us; }
-int vita2d_pgf_text_width(vita2d_pgf *f,float scale,const char *s) {
-    cairo_text_extents_t e; (void)f;
-    cairo_set_font_size(cr,24*scale); cairo_text_extents(cr,s,&e);
-    assert(cairo_status(cr)==CAIRO_STATUS_SUCCESS);
-    return (int)ceil(e.x_advance);
+vita2d_font *vita2d_load_font_file(const char *path) {
+    FT_Face face;
+    vita2d_font *font=calloc(1,sizeof(*font)); assert(font);
+    if (FT_New_Face(freetype,local(path),0,&face)) { free(font); return NULL; }
+    font->face=face; font->cairo_face=cairo_ft_font_face_create_for_ft_face(face,0);
+    fonts++; return font;
 }
-int vita2d_pgf_draw_text(vita2d_pgf *f,int x,int y,unsigned int c,float scale,const char *s) {
-    int width=vita2d_pgf_text_width(f,scale,s);
-    assert(scale>=.75f);
-    if (strcmp(s,expected_title)==0) selected_seen++;
-    if (expected_status && strcmp(s,expected_status)==0) status_seen++;
-    if (strstr(s,"X para ingresar el codigo")) pair_hint_seen++;
-    if (x==120 && (y==169 || y==233 || y==297 || y==361)) row_count++;
-    if (x==124 && y==178 && strlen(s)>0) line_one++;
-    if (x==124 && y==202 && strlen(s)>0) line_two++;
-    assert(probe_width<0 || width<=probe_width);
-    snprintf(drawn_text,sizeof(drawn_text),"%s",s);
-    assert(x>=0 && y>=0 && x+width<=960 && y<=544);
-    source(c); cairo_move_to(cr,x,y); cairo_show_text(cr,s);
-    assert(cairo_status(cr)==CAIRO_STATUS_SUCCESS); return width;
+void vita2d_free_font(vita2d_font *font) {
+    cairo_font_face_destroy(font->cairo_face); FT_Done_Face(font->face); free(font); fonts--;
+}
+int vita2d_font_text_width(vita2d_font *font,unsigned int size,const char *s) {
+    cairo_text_extents_t extents;
+    cairo_set_font_face(cr,font->cairo_face); cairo_set_font_size(cr,size);
+    cairo_text_extents(cr,s,&extents); assert(cairo_status(cr)==CAIRO_STATUS_SUCCESS);
+    return (int)ceil(extents.x_advance);
+}
+int vita2d_font_draw_text(vita2d_font *font,int x,int y,unsigned int color,unsigned int size,const char *s) {
+    int width=vita2d_font_text_width(font,size,s);
+    assert(size>=14 && size<=30);
+    if (!(x>=0 && y>=0 && x+width<=960 && y<=544)) {
+        fprintf(stderr,"Text overflow x=%d y=%d width=%d: %s\n",x,y,width,s); abort();
+    }
+    source(color); cairo_move_to(cr,x,y); cairo_show_text(cr,s);
+    assert(cairo_status(cr)==CAIRO_STATUS_SUCCESS);
+    (void)snprintf(last_text,sizeof(last_text),"%s",s); drawn++; return width;
+}
+
+static void settle(VpUiFrame *frame) {
+    size_t i;
+    for (i=0;i<45;i++) {
+        struct timespec pause={0,2000000};
+        pool_used=0; vp_ui_prepare(frame); vp_ui_render(frame); nanosleep(&pause,NULL);
+    }
 }
 
 int main(int argc,char **argv) {
-    static VpApp app, before;
+    static VpApp app,before;
     static VpDownloadQueue queue;
     static VpPlatformGroup groups[64];
     static size_t visible[12];
-    vita2d_pgf font={0};
-    cairo_surface_t *canvas=cairo_image_surface_create(CAIRO_FORMAT_ARGB32,960,544);
+    VpUiFonts typefaces;
     VpUiFrame frame={0};
-    const char *slugs[]={"arcade","dreamcast","gba","3ds","nds","gamecube","ps1","ps2","psp","genesis","snes","wii"};
-    const char *names[]={"Arcade","Dreamcast","Game Boy Advance","Nintendo 3DS","Nintendo DS","GameCube","PlayStation","PlayStation 2","PlayStation Portable","Sega Genesis","Super Nintendo","Nintendo Wii"};
-    const char *cases[]={"platforms","grid","list","carousel","settings","themes","romm","downloads","store","empty","last-page"};
+    vita2d_texture *covers[10]={0};
+    cairo_surface_t *canvas=cairo_image_surface_create(CAIRO_FORMAT_ARGB32,960,544);
+    const char *slugs[]={"arcade","dreamcast","gba","nds","gamecube","psx","psp","3ds","ps2","snes","genesis","wii"};
+    const char *titles[]={"Bloody Roar II","Castlevania: Symphony of the Night","Crash Bandicoot","Gran Turismo","Metal Gear Solid",
+        "Resident Evil","Silent Hill","Dino Crisis","Tomb Raider","Ridge Racer","A game with a very long title and accents: aventura fantástica","Another game"};
+    const char *cases[]={"platforms","carousel","list","grid","settings","general","interface","downloads","romm","storage","about","store","empty","last-page"};
     size_t c,i;
-    cr=cairo_create(canvas); cairo_select_font_face(cr,"sans-serif",CAIRO_FONT_SLANT_NORMAL,CAIRO_FONT_WEIGHT_NORMAL);
-    {
-        char long_text[VP_URL*2+32];
-        memset(long_text,'A',sizeof(long_text)-1); long_text[sizeof(long_text)-1]='\0';
-        probe_width=900; vp_ui_test_label(&font,probe_width,long_text);
-        assert(strlen(drawn_text)>=3 && strcmp(drawn_text+strlen(drawn_text)-3,"...")==0);
-        for (i=0;i+2<sizeof(long_text);i+=2) { long_text[i]=(char)0xc3; long_text[i+1]=(char)0xa9; }
-        long_text[i]='\0'; vp_ui_test_label(&font,probe_width,long_text);
-        assert(strlen(drawn_text)>=3 && strcmp(drawn_text+strlen(drawn_text)-3,"...")==0);
-        probe_width=1; vp_ui_test_label(&font,probe_width,"Text does not fit");
-        assert(drawn_text[0]=='\0');
-        vp_ui_test_label(&font,probe_width,""); assert(drawn_text[0]=='\0');
-        probe_width=-1;
-        {
-            char long_utf8[VP_URL*2+32];
-            const char *glyphs[]={"日","🎮"};
-            size_t a;
-            for (a=0;a<2;a++) {
-                size_t used=0, bytes=strlen(glyphs[a]);
-                while (used+bytes<sizeof(long_utf8)) { memcpy(long_utf8+used,glyphs[a],bytes); used+=bytes; }
-                long_utf8[used]='\0';
-                probe_width=108; vp_ui_test_label(&font,probe_width,long_utf8);
-                assert(strlen(drawn_text)>=3 && strcmp(drawn_text+strlen(drawn_text)-3,"...")==0);
-            }
-            probe_width=-1;
-        }
-    }
+    cr=cairo_create(canvas); assert(!FT_Init_FreeType(&freetype)); assert(vp_ui_fonts_load(&typefaces));
+    assert(vp_ui_backdrop_init());
     vp_app_init(&app);
-    assert(vp_theme_load(&app.theme,"name=VitaPlus Aurora\nbackground=#101624\nsurface=#222b3d\naccent=#87ddc4\ntext=#f1f3fa\nmuted=#a8b5c9\n"));
+    assert(vp_theme_load(&app.theme,"name=VitaPlus Blueglass\nbackground=#354b7c\nsurface=#8da9e6\naccent=#4f9fff\ntext=#fafcff\nmuted=#ccdff9\n"));
     for (i=0;i<12;i++) {
         VpItem item={0};
-        snprintf(item.id,sizeof(item.id),"romm:%u",(unsigned)i);
-        snprintf(item.title,sizeof(item.title),"%s",i==0?"Chrono Trigger":(i==1?"Super Mario Advance":"Un juego con titulo largo y acentos: aventura fantástica 日本語"));
-        snprintf(item.platform,sizeof(item.platform),"%s",slugs[i]);
-        snprintf(item.platform_display,sizeof(item.platform_display),"%s",names[i]);
-        snprintf(item.description,sizeof(item.description),"Una aventura que te espera. Explora mundos y descubre nuevos caminos.");
-        item.installed=i%2==0; item.favorite=i==0; vp_catalog_add(&app.catalog,&item);
-        visible[i]=i;
+        (void)snprintf(item.id,sizeof(item.id),"romm:%u",(unsigned)i);
+        (void)snprintf(item.title,sizeof(item.title),"%s",titles[i]);
+        (void)snprintf(item.platform,sizeof(item.platform),"psx");
+        (void)snprintf(item.platform_display,sizeof(item.platform_display),"PlayStation");
+        (void)snprintf(item.description,sizeof(item.description),"Bloody Roar is back with this sequel. Among the new and improved features are several new characters, new stages and enhanced 3D graphics.");
+        item.installed=i%2==0; item.favorite=i==0; vp_catalog_add(&app.catalog,&item); visible[i]=i;
     }
-    for (i=0;i<64;i++) {
-        snprintf(groups[i].platform,sizeof(groups[i].platform),"%s",slugs[i%12]);
-        snprintf(groups[i].display,sizeof(groups[i].display),"%s",names[i%12]); groups[i].count=24+i;
+    for (i=0;i<12;i++) {
+        (void)snprintf(groups[i].platform,sizeof(groups[i].platform),"%s",slugs[i]);
+        (void)snprintf(groups[i].display,sizeof(groups[i].display),"%s",slugs[i]); groups[i].count=8;
     }
     queue.count=6;
-    for (i=0;i<queue.count;i++) {
-        queue.entries[i].item=app.catalog.items[i]; queue.entries[i].state=(VpDownloadState)(i%5);
-        queue.entries[i].percent=(unsigned)i*20;
-        snprintf(queue.entries[i].error,sizeof(queue.entries[i].error),"Sin conexion al servidor. X reintenta.");
-    }
-    frame.app=&app; frame.font=&font; frame.groups=groups; frame.group_count=12;
+    for (i=0;i<queue.count;i++) { queue.entries[i].item=app.catalog.items[i]; queue.entries[i].state=(VpDownloadState)(i%6); queue.entries[i].percent=(unsigned)i*20; }
+    frame.app=&app; frame.font=&typefaces; frame.groups=groups; frame.group_count=12;
     frame.visible=visible; frame.visible_count=12; frame.downloads=&queue;
     frame.active_theme="default"; frame.romm_url="https://romm.example.test"; frame.pair_code="";
+    (void)snprintf(frame.date,sizeof(frame.date),"19 Nov"); (void)snprintf(frame.time,sizeof(frame.time),"18:24");
+    frame.battery_percent=92;
+    if (argc>2) for (i=0;i<10;i++) {
+        char path[1024]; (void)snprintf(path,sizeof(path),"%s/%u.png",argv[2],(unsigned)i);
+        covers[i]=vita2d_load_PNG_file(path);
+    }
     {
-        const VpRommConnectionState states[]={VP_ROMM_UNCONFIGURED,VP_ROMM_CHECKING,
-            VP_ROMM_CONNECTED,VP_ROMM_INVALID_TOKEN,VP_ROMM_FORBIDDEN,VP_ROMM_UNREACHABLE};
-        const char *messages[]={"Configura la URL y genera un pair code en RomM.",
-            "Comprobando la conexion con RomM...", "RomM conectado correctamente.",
-            "El token ya no funciona. Ingresa un nuevo pair code.",
-            "El token no tiene permisos de lectura. Revisa RomM.",
-            "No se pudo verificar RomM. Revisa la red y reintenta."};
-        app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true;
-        for (i=0;i<sizeof(states)/sizeof(states[0]);i++) {
-            size_t warmup;
-            frame.romm_state=states[i]; expected_status=NULL;
-            for (warmup=0;warmup<40;warmup++) vp_ui_render(&frame);
-            expected_status=messages[i];
-            status_seen=pair_hint_seen=check_seen=0;
-            vp_ui_render(&frame);
-            assert(status_seen==1);
-            assert(pair_hint_seen==(vp_romm_pair_code_enabled(states[i])?1:0));
-            assert(check_seen==(states[i]==VP_ROMM_CONNECTED?1:0));
-        }
-        expected_status=NULL;
+        char long_text[1600]; memset(long_text,'W',sizeof(long_text)-1); long_text[sizeof(long_text)-1]='\0';
+        vp_ui_text(&typefaces,VP_TYPE_HERO_TITLE,false,10,40,108,0xffffffffu,long_text);
+        assert(vita2d_font_text_width(typefaces.weights[3],26,last_text)<=108 && strstr(last_text,"..."));
+        vp_ui_text(&typefaces,VP_TYPE_GRID_TITLE,false,0,40,1,0xffffffffu,"é日本語"); assert(!last_text[0]);
+        vp_ui_text(&typefaces,VP_TYPE_GRID_TITLE,false,0,40,90,0xffffffffu,"Pokémon — edición fantástica");
+        assert(vp_ui_text_width(&typefaces,VP_TYPE_GRID_TITLE,false,last_text)<=90);
+        vp_ui_text(&typefaces,VP_TYPE_GRID_TITLE,false,0,40,400,0xffffffffu,"A truncated UTF-8 title \xc3");
+        assert(strstr(last_text,"...")!=NULL);
+        vp_ui_text(&typefaces,VP_TYPE_GRID_TITLE,false,0,40,400,0xffffffffu,"A title\nwith an unexpected line break");
+        assert(strchr(last_text,'\n')==NULL);
     }
     for (c=0;c<sizeof(cases)/sizeof(cases[0]);c++) {
-        char path[1024];
-        app.active_screen=VP_SCREEN_LIBRARY; app.library_level=VP_LEVEL_PLATFORMS; app.selected_platform=0;
-        frame.settings_detail=false; frame.settings_section=0; frame.group_count=12;
-        if (c>=1 && c<=3) { app.library_level=VP_LEVEL_ROMS; app.active_view=(VpView)(c-1); }
-        if (c>=4 && c<=7) {
-            app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=c!=4;
-            frame.settings_section=c==5?1:(c==7?2:0);
-        }
-        if (c==8) app.active_screen=VP_SCREEN_STORES;
-        if (c==9) frame.group_count=0;
-        if (c==10) { frame.group_count=64; app.selected_platform=63; }
-        before=app;
-        for (i=0;i<40;i++) vp_ui_render(&frame);
-        assert(memcmp(&app,&before,sizeof(app))==0);
-        if (argc>1) {
-            snprintf(path,sizeof(path),"%s/%s.png",argv[1],cases[c]);
-            assert(cairo_surface_write_to_png(canvas,path)==CAIRO_STATUS_SUCCESS);
-        }
+        app.active_screen=VP_SCREEN_LIBRARY; app.library_level=VP_LEVEL_PLATFORMS; app.selected_platform=5; app.selected_item=0;
+        frame.group_count=12; frame.visible_count=12; frame.settings_detail=false;
+        if (c>=1 && c<=3) { app.library_level=VP_LEVEL_ROMS; app.active_view=c==1?VP_VIEW_CAROUSEL:(c==2?VP_VIEW_LIST:VP_VIEW_GRID); }
+        if (c>=4 && c<=10) { app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=c!=4; frame.settings_section=c==4?0:(int)c-5; }
+        if (c==11) app.active_screen=VP_SCREEN_STORES;
+        if (c==12) frame.group_count=0;
+        if (c==13) { app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_GRID; app.selected_item=11; }
+        (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
+        frame.romm_state=VP_ROMM_CONNECTED;
+        for (i=0;i<10;i++) frame.covers[i]=covers[i];
+        if (app.active_view==VP_VIEW_CAROUSEL) for (i=0;i<7;i++) frame.covers[i]=covers[(i+7)%10];
+        before=app; settle(&frame); assert(!memcmp(&app,&before,sizeof(app)));
+        if (argc>1) { char path[1024]; (void)snprintf(path,sizeof(path),"%s/%s.png",argv[1],cases[c]); assert(!cairo_surface_write_to_png(canvas,path)); }
     }
-    {
-        static VpDownloadQueue queue_before;
-        static VpPlatformGroup groups_before[64];
-        size_t visible_before[12], selection, view;
-        const char *samples[]={"", "é", "日本語", "🎮", "é 日本語 🎮", "a very long title with spaces and unicode 日本語 🎮"};
-        int widths[]={0,1,10,20,40,108,900};
-        size_t a,b;
-        for (a=0;a<sizeof(samples)/sizeof(samples[0]);a++)
-            for (b=0;b<sizeof(widths)/sizeof(widths[0]);b++) {
-                probe_width=widths[b]; vp_ui_test_label(&font,probe_width,samples[a]);
-            }
-        probe_width=-1;
-        for (a=0;a<12;a++) {
-            snprintf(app.catalog.items[a].title,sizeof(app.catalog.items[a].title),"Item%02u",(unsigned)a);
-            queue.entries[a%6].item=app.catalog.items[a];
-        }
-        for (selection=0;selection<12;selection++) for (view=0;view<3;view++) {
-            app.active_screen=VP_SCREEN_LIBRARY; app.library_level=VP_LEVEL_ROMS;
-            app.active_view=(VpView)view; app.selected_item=selection;
-            snprintf(expected_title,sizeof(expected_title),"Item%02u",(unsigned)selection);
-            selected_seen=0; before=app; queue_before=queue;
-            memcpy(groups_before,groups,sizeof(groups)); memcpy(visible_before,visible,sizeof(visible));
-            vp_ui_render(&frame); assert(selected_seen>=2);
-            assert(memcmp(&before,&app,sizeof(app))==0);
-            assert(memcmp(&queue_before,&queue,sizeof(queue))==0);
-            assert(memcmp(groups_before,groups,sizeof(groups))==0);
-            assert(memcmp(visible_before,visible,sizeof(visible))==0);
-        }
-        app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true; frame.settings_section=2;
-        for (selection=0;selection<queue.count;selection++) {
-            frame.download_selection=selection;
-            snprintf(expected_title,sizeof(expected_title),"%.63s",queue.entries[selection].item.title);
-            selected_seen=0; row_count=0; queue_before=queue; before=app;
-            vp_ui_render(&frame);
-            assert(selected_seen==1); assert(row_count==(selection<4?4:2));
-            assert(memcmp(&before,&app,sizeof(app))==0); assert(memcmp(&queue_before,&queue,sizeof(queue))==0);
-        }
-        frame.settings_detail=false; app.active_screen=VP_SCREEN_LIBRARY; app.library_level=VP_LEVEL_PLATFORMS;
-        app.selected_platform=0; frame.group_count=1;
-        snprintf(groups[0].display,sizeof(groups[0].display),"Alpha Beta Gamma Delta 日本語 🎮");
-        line_one=line_two=0; vp_ui_render(&frame); assert(line_one==1 && line_two==1);
-        queue.count=0; app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true; frame.settings_section=2;
-        vp_ui_render(&frame);
-        puts("independent public-frame probes: PASS (36 ROM selections/views, 6 queue selections, empty queue, UTF-8 width matrix, snapshot immutability)");
-    }
-    assert(loaded==((1u<<13)-1));
-    vp_ui_shutdown(); assert(texture_count==0);
-    missing=1; frame.group_count=12; app.selected_platform=0;
-    for (i=0;i<40;i++) vp_ui_render(&frame);
-    assert(texture_count==0);
-    vp_ui_shutdown(); cairo_destroy(cr); cairo_surface_destroy(canvas);
-    puts("renderer smoke tests: PASS (11 states, 12 platforms, RomM, readable text, UTF-8, immutable model, missing assets, cleanup)");
+    vp_ui_shutdown();
+    missing=true; frame.group_count=12; app.library_level=VP_LEVEL_PLATFORMS; app.active_screen=VP_SCREEN_LIBRARY;
+    settle(&frame); vp_ui_shutdown();
+    for (i=0;i<10;i++) if (covers[i]) vita2d_free_texture(covers[i]);
+    vp_ui_fonts_free(&typefaces);
+    assert(!textures && !fonts && drawn>0);
+    cairo_destroy(cr); cairo_surface_destroy(canvas); FT_Done_FreeType(freetype);
+    puts("Blueglass renderer: 14 states, actual Inter metrics, UTF-8 truncation, missing resources and cleanup passed");
     return 0;
 }

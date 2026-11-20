@@ -66,6 +66,7 @@ typedef struct {
     bool favorite;
     bool multi_file;
     unsigned long last_played;
+    char background_url[VP_URL];
 } VpItem;
 
 typedef enum {

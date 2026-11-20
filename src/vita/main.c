@@ -3,9 +3,12 @@
 #include <psp2/ime_dialog.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
+#include <psp2/io/devctl.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/sysmodule.h>
 #include <psp2/touch.h>
+#include <psp2/power.h>
+#include <psp2/rtc.h>
 #include <vita2d.h>
 
 #include <curl/curl.h>
@@ -14,6 +17,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "vita_backend.h"
@@ -21,6 +25,8 @@
 #include "ui_audio.h"
 #include "ui_presentation.h"
 #include "ui_renderer.h"
+#include "ui_backdrop.h"
+#include "catalog_cache.h"
 #include "vita_thread_priority.h"
 
 /* vitasdk 2026.08 omits these from SceAppMgrSystemEventType. The ABI values are
@@ -36,7 +42,7 @@
 #define VP_CONFIG_PATH "ux0:data/vitaplus/config.ini"
 #define VP_CATALOG_CACHE_PATH "ux0:data/vitaplus/catalog.cache"
 #define VP_CATALOG_CACHE_PARTIAL "ux0:data/vitaplus/catalog.cache.part"
-#define VP_CATALOG_CACHE_VERSION 1U
+#define VP_CATALOG_CACHE_VERSION 2U
 #define VP_TOUCH_WIDTH 1920
 #define VP_TOUCH_HEIGHT 1088
 #define VP_TOUCH_TAP_SLOP 32
@@ -98,7 +104,7 @@ static VpBackgroundJob background_job = {
     .mutex = PTHREAD_MUTEX_INITIALIZER
 };
 static VpDownloadQueue download_queue;
-#define VP_COVER_SLOTS 8
+#define VP_COVER_SLOTS 12
 static VpPlatformGroup platform_groups[VP_MAX_PLATFORMS];
 static size_t visible_indexes[VP_MAX_ITEMS];
 static size_t platform_group_count;
@@ -106,9 +112,11 @@ static size_t visible_count_cache;
 static VpLibraryLevel cached_library_level;
 static char cached_platform[VP_TEXT];
 static bool catalog_view_cache_dirty = true;
+static bool cover_cache_dirty;
 
 static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context);
 static void cover_path_for(const char *id, char *path, size_t capacity);
+static void artwork_path_for(const char *id, char *path, size_t capacity);
 
 static void show_notification(VpApp *app, const char *format, ...) {
     va_list arguments;
@@ -168,10 +176,10 @@ static bool load_catalog_cache(VpApp *app, const VpRommConfig *config) {
     valid = fread(cached_url, 1, sizeof(magic), file) == sizeof(magic) &&
             memcmp(cached_url, magic, sizeof(magic)) == 0 &&
             fread(&version, sizeof(version), 1, file) == 1 &&
-            version == VP_CATALOG_CACHE_VERSION &&
+            (version == VP_CATALOG_CACHE_VERSION || version == 1U) &&
             fread(cached_url, sizeof(cached_url), 1, file) == 1 &&
-            strcmp(cached_url, config->base_url) == 0 &&
-            fread(&cached_catalog, sizeof(cached_catalog), 1, file) == 1;
+            strcmp(cached_url, config->base_url) == 0;
+    if (valid) valid=vp_catalog_cache_read(file,version,&cached_catalog);
     if (fclose(file) != 0 || !valid || cached_catalog.count > VP_MAX_ITEMS) return false;
     app->catalog = cached_catalog;
     catalog_view_cache_dirty = true;
@@ -368,6 +376,7 @@ static void *background_job_run(void *context) {
         if (succeeded) (void)save_catalog_cache(&job->catalog, &config);
     } else if (kind == VP_JOB_SYNC_COVERS) {
         VpCoverTransformBackend cover_backend = {vp_vita_transform_cover, NULL};
+        VpCoverTransformBackend artwork_backend = {vp_vita_transform_background, NULL};
         size_t index;
         succeeded = true;
         for (index = 0; index < catalog->count; index++) {
@@ -388,6 +397,16 @@ static void *background_job_run(void *context) {
                 if (!transformed) (void)sceIoRemove(partial);
             }
             if (!transformed) succeeded = false;
+            if (cover->background_url[0]!='\0') {
+                VpItem artwork=*cover;
+                (void)snprintf(artwork.cover_url,sizeof(artwork.cover_url),"%s",cover->background_url);
+                artwork_path_for(cover->id,destination,sizeof(destination));
+                (void)snprintf(partial,sizeof(partial),"%s.tmp",destination);
+                if (vp_cache_cover(&artwork,&config,partial,artwork_backend)) {
+                    (void)sceIoRemove(destination);
+                    if (sceIoRename(partial,destination)<0) (void)sceIoRemove(partial);
+                }
+            }
             pthread_mutex_lock(&job->mutex);
             job->covers_completed++;
             pthread_mutex_unlock(&job->mutex);
@@ -565,6 +584,7 @@ static void background_job_poll(VpApp *app) {
     background_job.kind = VP_JOB_NONE;
     pthread_mutex_unlock(&background_job.mutex);
 
+    if (kind==VP_JOB_SYNC_COVERS) cover_cache_dirty=true;
     if (kind == VP_JOB_VALIDATE_ROMM || kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC) {
         /* URL edits invalidate in-flight authentication, pairing and catalog results. */
         if (!vp_romm_connection_apply(&romm_connection, romm_revision, romm_state)) {
@@ -753,13 +773,13 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
             settings_section--;
             vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
         }
-        if (pressed & SCE_CTRL_DOWN && settings_section < 2) {
+        if (pressed & SCE_CTRL_DOWN && settings_section < 5) {
             settings_section++;
             vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
         }
         if (pressed & SCE_CTRL_CROSS) {
             settings_detail_active = true;
-            if (settings_section == 0) request_romm_check();
+            if (settings_section == 3) request_romm_check();
             vp_ui_audio_play(VP_UI_SOUND_ENTER);
         }
         return;
@@ -826,7 +846,7 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         }
         return;
     }
-    if (settings_section != 0) return;
+    if (settings_section != 3) return;
     if (pressed & SCE_CTRL_UP) {
         settings_field = (settings_field + 3) % 4;
         vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
@@ -912,7 +932,13 @@ static void safe_id(const char *id, char *destination, size_t capacity) {
 static void cover_path_for(const char *id, char *path, size_t capacity) {
     char safe[VP_TEXT];
     safe_id(id, safe, sizeof(safe));
-    (void)snprintf(path, capacity, "ux0:data/vitaplus/cache/covers/processed-%s.png", safe);
+    (void)snprintf(path, capacity, "ux0:data/vitaplus/cache/covers/fit-v2-%s.png", safe);
+}
+
+static void artwork_path_for(const char *id,char *path,size_t capacity) {
+    char safe[VP_TEXT];
+    safe_id(id,safe,sizeof(safe));
+    (void)snprintf(path,capacity,"ux0:data/vitaplus/cache/covers/art-v1-%s.png",safe);
 }
 
 static void record_cover_event(const char *event, const char *id, const char *path) {
@@ -1159,6 +1185,12 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
         /* Probe through Vita I/O without opening a stdio stream just to check
          * for existence. Cached PNGs are decoded by the cover worker. */
         cover_fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+        if (cover_fd<0) {
+            char safe[VP_TEXT];
+            safe_id(item->id,safe,sizeof(safe));
+            (void)snprintf(path,sizeof(path),"ux0:data/vitaplus/cache/covers/processed-%s.png",safe);
+            cover_fd=sceIoOpen(path,SCE_O_RDONLY,0);
+        }
         if (cover_fd < 0) continue;
         sceIoClose(cover_fd);
         if (!cover_decode_request(item->id, path)) continue;
@@ -1167,14 +1199,25 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
         slot->attempted = true;
         return;
     }
-}
-
-static size_t platform_first_item(const VpCatalog *catalog, const char *platform) {
-    size_t index;
-    for (index = 0; index < catalog->count; index++) {
-        if (strcmp(catalog->items[index].platform, platform) == 0) return index;
+    /* At most one artwork decode after visible covers. A separate cache key
+     * prevents it from aliasing the selected game's cover texture. */
+    if (app->library_level==VP_LEVEL_ROMS && app->active_view!=VP_VIEW_GRID && app->selected_item<app->catalog.count) {
+        const VpItem *item=&app->catalog.items[app->selected_item];
+        char id[VP_TEXT],path[VP_PATH];
+        (void)snprintf(id,sizeof(id),"art:%.180s",item->id);
+        if (item->background_url[0] && !find_cover_slot(id)) {
+            SceUID fd;
+            artwork_path_for(item->id,path,sizeof(path));
+            fd=sceIoOpen(path,SCE_O_RDONLY,0);
+            if (fd>=0) {
+                sceIoClose(fd);
+                if (cover_decode_request(id,path)) {
+                    VpCoverSlot *slot=acquire_slot(id,indexes,count);
+                    if (slot) slot->attempted=true;
+                }
+            }
+        }
     }
-    return catalog->count;
 }
 
 static size_t visible_position(const size_t *visible, size_t count, size_t item_index) {
@@ -1280,17 +1323,23 @@ static void refresh_download_queue_progress(void) {
 
 /* Called only after the previous GPU frame completes, and before starting a scene.
  * Cache preparation may retire textures that the previous frame referenced. */
-static void prepare_shell(VpUiFrame *frame, vita2d_pgf *font, VpApp *app) {
+static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
     size_t group_count = 0;
     size_t visible_count = 0;
     size_t cover_count = 0;
     const VpItem *selected = NULL;
-    const VpPlatformGroup *selected_group = NULL;
     vita2d_texture *background_texture = NULL;
     size_t index;
 
     memset(frame, 0, sizeof(*frame));
     refresh_download_queue_progress();
+    if (cover_cache_dirty) {
+        for (index=0;index<VP_COVER_SLOTS;index++) {
+            if (cover_slots[index].texture) vita2d_free_texture(cover_slots[index].texture);
+            memset(&cover_slots[index],0,sizeof(cover_slots[index]));
+        }
+        cover_cache_dirty=false;
+    }
 
     if (app->active_screen == VP_SCREEN_LIBRARY) {
         refresh_catalog_view_cache(app);
@@ -1298,7 +1347,6 @@ static void prepare_shell(VpUiFrame *frame, vita2d_pgf *font, VpApp *app) {
             group_count = platform_group_count;
             if (group_count > 0 && app->selected_platform >= group_count)
                 app->selected_platform = group_count - 1;
-            if (group_count > 0) selected_group = &platform_groups[app->selected_platform];
         } else {
             visible_count = visible_count_cache;
             if (visible_count > 0) selected = &app->catalog.items[app->selected_item];
@@ -1306,36 +1354,30 @@ static void prepare_shell(VpUiFrame *frame, vita2d_pgf *font, VpApp *app) {
     }
 
     if (app->active_screen == VP_SCREEN_LIBRARY) {
-        if (app->library_level == VP_LEVEL_PLATFORMS) {
-            size_t start;
-            start = (app->selected_platform / 8) * 8;
-            for (index = start; index < group_count && index < start + 8; index++) {
-                size_t item_index = platform_first_item(&app->catalog, platform_groups[index].platform);
-                if (item_index < app->catalog.count && cover_count < VP_COVER_SLOTS)
-                    cover_indexes[cover_count++] = item_index;
-            }
-        } else {
-            size_t page_size = app->active_view == VP_VIEW_GRID ? 8 : (app->active_view == VP_VIEW_LIST ? 6 : 3);
+        if (app->library_level == VP_LEVEL_ROMS) {
+            size_t page_size = vp_ui_page_size(app->active_view);
             size_t position;
             size_t start;
             position = visible_position(visible_indexes, visible_count, app->selected_item);
             start = (position / page_size) * page_size;
             if (visible_count && app->active_view == VP_VIEW_CAROUSEL) {
-                cover_indexes[cover_count++] = visible_indexes[(position + visible_count - 1) % visible_count];
                 cover_indexes[cover_count++] = visible_indexes[position];
-                cover_indexes[cover_count++] = visible_indexes[(position + 1) % visible_count];
+                for (int distance=1;distance<=3;distance++) {
+                    cover_indexes[cover_count++] = visible_indexes[(position+visible_count-(size_t)distance%visible_count)%visible_count];
+                    cover_indexes[cover_count++] = visible_indexes[(position+(size_t)distance)%visible_count];
+                }
             } else {
+                if (visible_count) cover_indexes[cover_count++] = visible_indexes[position];
                 for (index = start; index < visible_count && index < start + page_size; index++)
-                    cover_indexes[cover_count++] = visible_indexes[index];
+                    if (index != position)
+                        cover_indexes[cover_count++] = visible_indexes[index];
             }
         }
         covers_step(app, cover_indexes, cover_count);
-        if (selected != NULL)
-            background_texture = cover_texture_for(selected->id);
-        if (background_texture == NULL && selected_group != NULL) {
-            size_t item_index = platform_first_item(&app->catalog, selected_group->platform);
-            if (item_index < app->catalog.count)
-                background_texture = cover_texture_for(app->catalog.items[item_index].id);
+        if (selected != NULL) {
+            char artwork_id[VP_TEXT];
+            (void)snprintf(artwork_id,sizeof(artwork_id),"art:%.180s",selected->id);
+            background_texture = cover_texture_for(artwork_id);
         }
     }
 
@@ -1347,12 +1389,13 @@ static void prepare_shell(VpUiFrame *frame, vita2d_pgf *font, VpApp *app) {
     frame->background = background_texture;
     if (visible_count) {
         size_t position = visible_position(visible_indexes, visible_count, app->selected_item);
-        size_t page = app->active_view == VP_VIEW_GRID ? 8 : 6;
+        size_t page = vp_ui_page_size(app->active_view);
         size_t start = (position / page) * page;
         if (app->active_view == VP_VIEW_CAROUSEL) {
-            size_t slots[3] = {(position + visible_count - 1) % visible_count, position, (position + 1) % visible_count};
-            for (index = 0; index < 3; index++)
-                frame->covers[index] = cover_texture_for(app->catalog.items[visible_indexes[slots[index]]].id);
+            for (int offset=-3;offset<=3;offset++) {
+                size_t slot=(position+visible_count+(size_t)((offset+(int)visible_count)%(int)visible_count))%visible_count;
+                frame->covers[offset+3] = cover_texture_for(app->catalog.items[visible_indexes[slot]].id);
+            }
         } else {
             for (index = start; index < visible_count && index < start + page; index++)
                 frame->covers[index - start] = cover_texture_for(app->catalog.items[visible_indexes[index]].id);
@@ -1365,15 +1408,47 @@ static void prepare_shell(VpUiFrame *frame, vita2d_pgf *font, VpApp *app) {
     frame->romm_state = romm_connection.state;
     frame->active_theme = active_theme;
     frame->notice_id = app->notice_id;
+    {
+        static unsigned long long status_at;
+        static char date[32],clock[16];
+        static int battery=-1;
+        static bool charging;
+        static unsigned long long free_space,total_space;
+        unsigned long long now=sceKernelGetProcessTimeWide();
+        if (!status_at || now-status_at>=1000000) {
+            SceDateTime time;
+            if (sceRtcGetCurrentClockLocalTime(&time)>=0) {
+                static const char *months[]={"Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"};
+                static const char *weekdays[]={"Dom","Lun","Mar","Mié","Jue","Vie","Sáb"};
+                int day=sceRtcGetDayOfWeek(time.year,time.month,time.day);
+                (void)snprintf(date,sizeof(date),"%s %u %s",weekdays[day>=0 && day<7?day:0],time.day,months[time.month>=1 && time.month<=12?time.month-1:0]);
+                (void)snprintf(clock,sizeof(clock),"%02u:%02u",time.hour,time.minute);
+            }
+            battery=scePowerGetBatteryLifePercent(); charging=scePowerIsBatteryCharging()>0;
+            if (app->active_screen==VP_SCREEN_SETTINGS && settings_section==4) {
+                SceIoDevInfo info={0};
+                if (sceIoDevctl("ux0:",0x3001,NULL,0,&info,sizeof(info))>=0) {
+                    free_space=info.free_size; total_space=info.max_size;
+                }
+            }
+            status_at=now;
+        }
+        (void)snprintf(frame->date,sizeof(frame->date),"%s",date);
+        (void)snprintf(frame->time,sizeof(frame->time),"%s",clock);
+        frame->battery_percent=battery; frame->battery_charging=charging;
+        frame->storage_free=free_space; frame->storage_total=total_space;
+    }
     pthread_mutex_lock(&background_job.mutex);
     frame->busy = background_job.active;
     pthread_mutex_unlock(&background_job.mutex);
+    vp_ui_prepare(frame);
 }
 
 static unsigned int touch_navigation_pressed(int x, int y) {
     int slot;
     int screen = vp_ui_touch_dock_screen(x, y);
     if (screen >= 0) {
+        if (settings_ime_active) return 0;
         if (app.active_screen != (VpScreen)screen) {
             app.active_screen = (VpScreen)screen;
             vp_ui_audio_play(VP_UI_SOUND_TAB);
@@ -1382,11 +1457,12 @@ static unsigned int touch_navigation_pressed(int x, int y) {
     }
     if (app.active_screen == VP_SCREEN_LIBRARY) {
         refresh_catalog_view_cache(&app);
+        if (y>=492 && y<534 && x>=350 && x<595) return SCE_CTRL_CROSS;
         if (app.library_level == VP_LEVEL_PLATFORMS) {
             size_t target;
-            slot = vp_ui_touch_tile_slot(x, y);
+            slot = vp_ui_touch_console_slot(x, y);
             if (slot < 0) return 0;
-            target = (app.selected_platform / 8) * 8 + (size_t)slot;
+            target = vp_ui_console_start(app.selected_platform,platform_group_count)+(size_t)slot;
             if (target >= platform_group_count) return 0;
             if (target != app.selected_platform) {
                 app.selected_platform = target;
@@ -1397,15 +1473,17 @@ static unsigned int touch_navigation_pressed(int x, int y) {
         }
         if (vp_ui_touch_back(x, y)) return SCE_CTRL_CIRCLE;
         if (vp_ui_touch_view_toggle(x, y)) return SCE_CTRL_TRIANGLE;
+        if (y>=492 && y<534 && x>=700 && x<804) return SCE_CTRL_SQUARE;
         if (app.active_view == VP_VIEW_CAROUSEL) {
-            if (x >= 116 && x < 306 && y >= 173 && y < 377) return SCE_CTRL_LEFT;
-            if (x >= 654 && x < 844 && y >= 173 && y < 377) return SCE_CTRL_RIGHT;
-            if (x >= 365 && x < 595 && y >= 142 && y < 406) return SCE_CTRL_CROSS;
+            int offset=vp_ui_touch_carousel_offset(x,y);
+            if (offset<0) return SCE_CTRL_LEFT;
+            if (offset>0 && offset<99) return SCE_CTRL_RIGHT;
+            if (!offset) return SCE_CTRL_CROSS;
             return 0;
         }
         slot = app.active_view == VP_VIEW_GRID ? vp_ui_touch_tile_slot(x, y) : vp_ui_touch_list_slot(x, y);
         if (slot >= 0) {
-            size_t page = app.active_view == VP_VIEW_GRID ? 8 : 6;
+            size_t page = vp_ui_page_size(app.active_view);
             size_t position = visible_position(visible_indexes, visible_count_cache, app.selected_item);
             size_t target = (position / page) * page + (size_t)slot;
             if (target >= visible_count_cache) return 0;
@@ -1419,29 +1497,27 @@ static unsigned int touch_navigation_pressed(int x, int y) {
         return 0;
     }
     if (app.active_screen != VP_SCREEN_SETTINGS) return 0;
+    if (y>=492 && y<534 && x>=350 && x<595) return SCE_CTRL_CROSS;
+    if (settings_detail_active && settings_section==2 && y>=492 && y<534 && x>=700 && x<804) return SCE_CTRL_SQUARE;
     if (settings_detail_active && vp_ui_touch_back(x, y)) return SCE_CTRL_CIRCLE;
+    if (vp_ui_touch_view_toggle(x,y) && settings_detail_active && settings_section==3) return SCE_CTRL_TRIANGLE;
     if (!settings_detail_active) {
-        for (slot = 0; slot < 3; slot++) {
-            int row_y = 149 + slot * 84;
-            if (x >= 96 && x < 864 && y >= row_y && y < row_y + 72) {
-                settings_section = slot;
-                return SCE_CTRL_CROSS;
-            }
-        }
+        slot=vp_ui_touch_settings_slot(x,y);
+        if (slot>=0) { settings_section=slot; return SCE_CTRL_CROSS; }
         return 0;
     }
-    if (settings_section == 0) {
+    if (settings_section == 3) {
         for (slot = 0; slot < 4; slot++) {
-            int row_y = 145 + slot * 62;
-            if (x >= 64 && x < 896 && y >= row_y && y < row_y + 54) {
+            int row_y = 112 + slot * 72;
+            if (x >= 310 && x < 910 && y >= row_y && y < row_y + 62) {
                 settings_field = slot;
                 return SCE_CTRL_CROSS;
             }
         }
     } else if (settings_section == 2) {
         for (slot = 0; slot < 4 && (size_t)slot < download_queue.count; slot++) {
-            int row_y = 145 + slot * 64;
-            if (x >= 64 && x < 896 && y >= row_y && y < row_y + 58) {
+            int row_y = 120 + slot * 76;
+            if (x >= 310 && x < 910 && y >= row_y && y < row_y + 68) {
                 download_selection = (download_selection / 4) * 4 + (size_t)slot;
                 return SCE_CTRL_CROSS;
             }
@@ -1509,7 +1585,8 @@ int main(void) {
     SceCtrlData pad;
     SceTouchData touch;
     unsigned int previous = 0;
-    vita2d_pgf *font;
+    VpUiFonts fonts;
+    VpUiFonts *font=&fonts;
     bool curl_cleanup_allowed;
     bool request_quit = false;
     bool rendered_once = false;
@@ -1531,10 +1608,9 @@ int main(void) {
     request_romm_check();
     (void)load_catalog_cache(&app, &romm_config);
     refresh_downloaded_items(&app);
-    (void)sceSysmoduleLoadModule(SCE_SYSMODULE_PGF);
     vita2d_init();
-    font = vita2d_load_default_pgf();
-    if (font == NULL) return 1;
+    if (!vp_ui_fonts_load(font)) { vita2d_fini(); return 1; }
+    (void)vp_ui_backdrop_init();
     (void)cover_decoder_init();
     (void)vp_ui_audio_init();
     (void)sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
@@ -1593,8 +1669,8 @@ int main(void) {
             }
             if (app.active_screen == VP_SCREEN_LIBRARY) {
                 int columns = app.library_level == VP_LEVEL_PLATFORMS
-                                  ? 4
-                                  : (app.active_view == VP_VIEW_GRID ? 4 : (app.active_view == VP_VIEW_LIST ? 1 : 3));
+                                  ? (int)(platform_group_count?platform_group_count:1)
+                                  : (app.active_view == VP_VIEW_GRID ? 5 : 1);
                 if (pressed & SCE_CTRL_UP) {
                     size_t selected_platform = app.selected_platform;
                     size_t selected_item = app.selected_item;
@@ -1661,7 +1737,7 @@ int main(void) {
         for (index = 0; index < VP_COVER_SLOTS; index++)
             if (cover_slots[index].texture) vita2d_free_texture(cover_slots[index].texture);
     }
-    vita2d_free_pgf(font);
+    vp_ui_fonts_free(font);
     vita2d_fini();
     pthread_mutex_lock(&background_job.mutex);
     curl_cleanup_allowed = !background_job.active;

@@ -2,6 +2,10 @@
 
 Tiny HTTP service that receives image bytes, center-crops them, resizes them, and returns a PNG.
 
+For complete game covers, send `mode=contain`: it preserves the entire source and
+returns its natural aspect ratio within the requested size. The default mode
+(`cover`) retains the existing exact-size center crop for backgrounds.
+
 It has no database, job queue, cache, framework, or remote URL fetcher. A caller can place a normal HTTP cache in front of it if needed.
 
 ## Run
@@ -49,8 +53,16 @@ Content-Type: application/octet-stream
 
 The response is `image/png`, exactly `width × height`, with a center crop that preserves the source aspect ratio. PNG, JPEG, and GIF input are supported through Go's standard library. Output dimensions are limited to `1024×1024`; input bodies to `8 MiB`; and source dimensions to 16 megapixels.
 
+Example: `/image?width=256&height=320&mode=contain` returns a square source as
+`256×256`, a 1:2 portrait as `160×320`, or a 2:1 landscape as `256×128`.
+`mode=cover` returns exactly the requested dimensions. Other mode values return 400.
+
 The caller downloads the source image and sends its raw bytes. This keeps the service independent from RomM authentication and prevents it from becoming an SSRF proxy.
 
 ## Cache note
 
-Cover output is downscaled with a quality resampler and returned as PNG. After deploying a new version of this service, existing Vita-side processed covers (`ux0:data/vitaplus/cache/covers/processed-*.png`) keep the old pixels until you run **Sincronizar metadata** in Settings/RomM or clear the covers cache on the device.
+Cover output is downscaled with a quality resampler and returned as PNG. Blueglass
+writes complete covers to `ux0:data/vitaplus/cache/covers/fit-v2-*.png` and game
+backgrounds to `art-v1-*.png`. Existing `processed-*.png` files remain a fallback.
+Redeploy this service, synchronize the catalog, then run **Sincronizar metadata**
+in Settings/RomM to replace old cropped images and prepare available game backgrounds.

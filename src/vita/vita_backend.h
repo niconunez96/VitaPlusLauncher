@@ -21,6 +21,8 @@ bool vp_vita_transfer_with_progress(const char *url, const char *bearer_token,
                                     void *context);
 bool vp_vita_transform_cover(const char *source_url, const char *bearer_token,
                              const char *service_url, const char *destination, void *context);
+bool vp_vita_transform_background(const char *source_url, const char *bearer_token,
+                                  const char *service_url, const char *destination, void *context);
 bool vp_vita_launch_uri(const char *uri);
 
 #endif

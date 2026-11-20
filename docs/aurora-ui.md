@@ -1,5 +1,8 @@
 # Aurora UI: assets and verification
 
+This document describes the previous Aurora presentation. The active renderer,
+font and artwork inventory are documented in [Blueglass UI](blueglass-ui.md).
+
 Aurora replaces presentation, not the launcher model. Providers, download actions,
 pairing, the persisted catalog, the system PGF font and controller mappings stay in
 their existing layers. The store remains a placeholder.

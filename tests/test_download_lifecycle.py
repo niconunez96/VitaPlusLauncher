@@ -56,7 +56,8 @@ class VitaDownloadLifecycleTests(unittest.TestCase):
         self.assertIn("SCE_CTRL_SQUARE", MAIN)
         self.assertIn("vp_download_queue_remove", MAIN)
         self.assertIn("Pausada", RENDERER)
-        self.assertRegex(RENDERER, r"Cuadrado\s+borra")
+        self.assertIn("Reintentar", RENDERER)
+        self.assertIn("Quitar", RENDERER)
         self.assertIn("Cuadrado", README)
 
 

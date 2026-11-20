@@ -94,6 +94,35 @@ static bool vp_json_flag(const char *object, const char *object_end, const char 
     return strcmp(value, "true") == 0;
 }
 
+/* RomM exposes its already-hosted game artwork as merged_screenshots. Only
+ * explicit URL fields/strings are accepted; missing metadata keeps the fallback. */
+static void vp_romm_artwork(const char *object,const char *end,VpItem *item) {
+    char value[VP_URL];
+    const char *match,*cursor;
+    size_t used=0;
+    if (vp_json_value(object,end,"background_url",value,sizeof(value)) &&
+        (value[0]=='/' || !strncmp(value,"https://",8) || !strncmp(value,"http://",7))) {
+        vp_copy(item->background_url,sizeof(item->background_url),value);
+        return;
+    }
+    match=strstr(object,"\"merged_screenshots\"");
+    if (!match || match>=end) return;
+    cursor=strchr(match+strlen("\"merged_screenshots\""),':');
+    if (!cursor || cursor>=end) return;
+    cursor=vp_skip_space(cursor+1);
+    if (cursor>=end || *cursor!='[') return;
+    cursor=vp_skip_space(cursor+1);
+    if (cursor>=end || *cursor!='"') return;
+    ++cursor;
+    while (cursor<end && *cursor!='"' && used+1<sizeof(value)) {
+        if (*cursor=='\\' && cursor+1<end && (cursor[1]=='/' || cursor[1]=='\\' || cursor[1]=='"')) ++cursor;
+        value[used++]=*cursor++;
+    }
+    value[used]='\0';
+    if (cursor<end && *cursor=='"' && (value[0]=='/' || !strncmp(value,"https://",8) || !strncmp(value,"http://",7)))
+        vp_copy(item->background_url,sizeof(item->background_url),value);
+}
+
 static const char *vp_object_end(const char *begin) {
     int depth = 0;
     bool quoted = false;
@@ -968,6 +997,7 @@ static bool vp_import_items(VpCatalog *catalog, const char *json, VpSource sourc
             !vp_json_value(cursor, end, "cover_url", item.cover_url, sizeof(item.cover_url))) {
             (void)vp_json_value(cursor, end, "url_cover", item.cover_url, sizeof(item.cover_url));
         }
+        if (source==VP_SOURCE_ROMM) vp_romm_artwork(cursor,end,&item);
         if (vp_catalog_add(catalog, &item) != NULL) imported++;
         cursor = end;
     }
@@ -1213,6 +1243,7 @@ static bool vp_romm_import_page(VpCatalog *catalog, const char *json, size_t *it
             !vp_json_value(cursor, object_end, "path_cover_large", item.cover_url, sizeof(item.cover_url)) &&
             !vp_json_value(cursor, object_end, "cover_url", item.cover_url, sizeof(item.cover_url)))
             (void)vp_json_value(cursor, object_end, "url_cover", item.cover_url, sizeof(item.cover_url));
+        vp_romm_artwork(cursor,object_end,&item);
         if (vp_catalog_add(catalog, &item) != NULL) imported++;
         cursor = object_end;
     }
@@ -1230,6 +1261,8 @@ static void vp_romm_normalize_urls(VpCatalog *catalog, const char *base_url) {
             vp_copy(item->cover_url, sizeof(item->cover_url), absolute);
         if (item->download_url[0] == '/' && vp_join_url(absolute, sizeof(absolute), base_url, item->download_url))
             vp_copy(item->download_url, sizeof(item->download_url), absolute);
+        if (item->background_url[0] == '/' && vp_join_url(absolute,sizeof(absolute),base_url,item->background_url))
+            vp_copy(item->background_url,sizeof(item->background_url),absolute);
     }
 }
 

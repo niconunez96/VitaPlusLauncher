@@ -7,8 +7,8 @@ int main(void) {
     VpUiAppearance appearance = {180, 16, 130};
     const char *aliases[][2] = {
         {"SNES", "snes"}, {"megadrive", "genesis"}, {"mega-drive", "genesis"},
-        {"playstation", "psx"}, {"PS Vita", "vita"}, {"gbc", "gameboy"},
-        {"neogeo", "arcade"}, {"turbografx-16", "pce"}, {"sms", "mastersystem"}
+        {"playstation", "psx"}, {"PS Vita", "vita"},
+        {"turbografx-16", "pce"}, {"sms", "mastersystem"}
     };
     size_t i;
     const char *requested[][2] = {
@@ -27,26 +27,43 @@ int main(void) {
         assert(strcmp(vp_ui_platform(aliases[i][0])->asset, vp_ui_platform(aliases[i][1])->asset) == 0);
     assert(strcmp(vp_ui_platform("unknown")->asset, "platform_generic") == 0);
     assert(strcmp(vp_ui_platform(NULL)->asset, "platform_generic") == 0);
-    for (i = 0; i < 8; ++i) {
+    assert(strcmp(vp_ui_platform("gbc")->asset,"platform_gameboycolor")==0);
+    assert(strcmp(vp_ui_platform("neogeo")->asset,"platform_neogeo")==0);
+    for (i = 0; i < VP_UI_GRID_PAGE; ++i) {
         VpUiRect r = vp_ui_tile(i);
-        assert(r.x >= 24 && r.y >= 140 && r.x + r.w <= 936 && r.y + r.h <= 414);
+        assert(r.x >= 24 && r.y >= 140 && r.x + r.w <= 936 && r.y + r.h <= 480);
         assert(vp_ui_touch_tile_slot(r.x, r.y) == (int)i);
         assert(vp_ui_touch_tile_slot(r.x + r.w - 1, r.y + r.h - 1) == (int)i);
     }
-    assert(vp_ui_touch_tile_slot(27, 146) == -1);
-    assert(vp_ui_touch_tile_slot(242, 146) == -1);
-    assert(vp_ui_touch_list_slot(28, 146) == 0);
-    assert(vp_ui_touch_list_slot(931, 399) == 5);
-    assert(vp_ui_touch_list_slot(27, 146) == -1);
-    assert(vp_ui_touch_list_slot(28, 185) == -1);
-    assert(vp_ui_touch_dock_screen(278, 480) == 0);
-    assert(vp_ui_touch_dock_screen(434, 527) == 1);
-    assert(vp_ui_touch_dock_screen(745, 480) == 2);
-    assert(vp_ui_touch_dock_screen(746, 480) == -1);
-    assert(vp_ui_touch_view_toggle(802, 76));
-    assert(!vp_ui_touch_view_toggle(801, 76));
-    assert(vp_ui_touch_back(685, 421));
-    assert(!vp_ui_touch_back(684, 421));
+    for (i=0;i<VP_UI_CONSOLE_PAGE;i++) {
+        VpUiRect r=vp_ui_console_tile(i);
+        assert(vp_ui_touch_console_slot(r.x+1,r.y+1)==(int)i);
+    }
+    for (i=0;i<VP_UI_LIST_PAGE;i++) {
+        VpUiRect r=vp_ui_list_row(i);
+        assert(vp_ui_touch_list_slot(r.x,r.y)==(int)i);
+        assert(vp_ui_touch_list_slot(r.x+r.w,r.y)==-1);
+    }
+    for (i=0;i<6;i++) {
+        VpUiRect r=vp_ui_settings_row(i);
+        assert(vp_ui_touch_settings_slot(r.x,r.y)==(int)i);
+    }
+    assert(vp_ui_console_start(0,12)==0 && vp_ui_console_start(11,12)==4);
+    assert(vp_ui_console_start(3,4)==0);
+    assert(vp_ui_touch_tile_slot(47,158)==-1);
+    assert(vp_ui_touch_tile_slot(210,158)==-1);
+    assert(vp_ui_touch_dock_screen(256,20)==0);
+    assert(vp_ui_touch_dock_screen(406,20)==1);
+    assert(vp_ui_touch_dock_screen(518,20)==2);
+    assert(vp_ui_touch_dock_screen(638,20)==-1);
+    assert(vp_ui_touch_dock_screen(278,500)==-1);
+    assert(vp_ui_touch_view_toggle(824,513));
+    assert(!vp_ui_touch_view_toggle(803,513));
+    assert(vp_ui_touch_back(613,513));
+    assert(!vp_ui_touch_back(599,513));
+    assert(vp_ui_touch_carousel_offset(480,220)==0);
+    assert(vp_ui_touch_carousel_offset(260,220)==-1);
+    assert(vp_ui_touch_carousel_offset(20,100)==99);
     assert(vp_ui_ease(-1) == 0 && vp_ui_ease(1) == 1 && vp_ui_ease(2) == 1);
     assert(vp_ui_ease(.5f) > .5f);
     vp_ui_appearance_load(&appearance, "id=legacy\nbackground=#101624\n");
