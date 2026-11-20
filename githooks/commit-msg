@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Enforced locally; CI repeats this validation for every pushed commit.
+set -eu
+repo_root=$(git rev-parse --show-toplevel)
+exec python3 "$repo_root/scripts/validate_commit_message.py" --file "$1"

@@ -36,6 +36,26 @@ make test
 
 No necesita VitaSDK ni red real: las pruebas usan un backend de transferencia falso.
 
+## CI, releases y convención de commits
+
+Cada `push` a `main` ejecuta GitHub Actions en este orden: valida los commits, corre `make test`, compila el VPK con VitaSDK/Docker y sólo si todo quedó verde crea una GitHub Release con notas generadas y el VPK adjunto.
+
+Las versiones empiezan en `v0.0.0` y el nivel más alto de los commits no-merge del push determina el siguiente tag SemVer. Todo commit debe usar exactamente uno de estos asuntos convencionales:
+
+```text
+PATCH: corregir caché corrupta       # v1.2.3 -> v1.2.4
+MINOR(ui): agregar vista de lista    # v1.2.3 -> v1.3.0
+MAJOR!: retirar API heredada         # v1.2.3 -> v2.0.0
+```
+
+El hook versionado bloquea mensajes inválidos en cada checkout. Activarlo una vez antes de commitear:
+
+```sh
+./scripts/install-git-hooks.sh
+```
+
+GitHub Actions repite esa validación, por lo que agentes y clientes sin el hook no pueden publicar una release a partir de commits inválidos. Para que un PR por *squash* conserve el contrato, su título también debe usar `PATCH`, `MINOR` o `MAJOR`. En GitHub, proteger `main` y exigir el check **Validate release-intent commits** antes de permitir merge.
+
 ## Compilar para Vita
 
 Con Docker (recomendado, no hace falta instalar VitaSDK en el host):

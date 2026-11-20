@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release-intent commits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select pushed commit range
+        id: commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            range="$PR_BASE..$AFTER"
+          elif [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            range="$(git rev-list --max-parents=0 HEAD)..$AFTER"
+          else
+            range="$BEFORE..$AFTER"
+          fi
+          echo "range=$range" >> "$GITHUB_OUTPUT"
+      - name: Enforce conventional release levels
+        run: python3 scripts/validate_commits.py "${{ steps.commits.outputs.range }}"
+
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run host suite
+        run: make test
+      - name: Run release automation tests
+        run: python3 tests/test_release_automation.py
+
+  build-vpk:
+    name: Build VPK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build VPK with VitaSDK
+        run: ./scripts/build-vpk.sh --clean
+      - name: Upload VPK
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitashelflauncher-vpk
+          path: dist/vitashelflauncher.vpk
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [validate, host-tests, build-vpk]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: main-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: vitashelflauncher-vpk
+          path: release-assets
+      - name: Calculate the next semantic version
+        id: version
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          git fetch --tags --force
+          current=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
+          if [ -n "$current" ]; then
+            range="$current..$AFTER"
+          elif [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            current="v0.0.0"
+            range="$BEFORE..$AFTER"
+          else
+            echo "Cannot establish a first-release commit range" >&2
+            exit 1
+          fi
+          next=$(python3 scripts/next_version.py --current "$current" --range "$range")
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+      - name: Create annotated tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+          mv release-assets/vitashelflauncher.vpk "release-assets/VitaShelfLauncher-${TAG}.vpk"
+          gh release create "$TAG" "release-assets/VitaShelfLauncher-${TAG}.vpk" \
+            --title "VitaShelf Launcher ${TAG}" --generate-notes
