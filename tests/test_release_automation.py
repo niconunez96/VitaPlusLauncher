@@ -94,7 +94,7 @@ class WorkflowContractTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("pull_request:", workflow)
         self.assertIn("name: Validate pull request title", workflow)
-        self.assertIn("python3 scripts/validate_pr_title.py \"$PR_TITLE\"", workflow)
+        self.assertIn("python3 scripts/validate_pr_title.py --title \"$PR_TITLE\"", workflow)
         self.assertIn("make test", workflow)
         self.assertIn("./scripts/build-vpk.sh --clean", workflow)
         self.assertIn("needs: [validate, host-tests, build-vpk]", workflow)
