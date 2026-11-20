@@ -18,6 +18,7 @@ VpUiRect vp_ui_console_tile(size_t slot);
 VpUiRect vp_ui_list_row(size_t slot);
 VpUiRect vp_ui_carousel_tile(int offset);
 VpUiRect vp_ui_settings_row(size_t slot);
+VpUiRect vp_ui_settings_content_card(void);
 int vp_ui_touch_console_slot(int x, int y);
 int vp_ui_touch_carousel_offset(int x, int y);
 int vp_ui_touch_settings_slot(int x, int y);

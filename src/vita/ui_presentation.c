@@ -90,6 +90,11 @@ VpUiRect vp_ui_settings_row(size_t slot) {
     return r;
 }
 
+VpUiRect vp_ui_settings_content_card(void) {
+    VpUiRect r = {310, 148, 600, 270};
+    return r;
+}
+
 static bool inside(VpUiRect r, int x, int y) {
     return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h;
 }

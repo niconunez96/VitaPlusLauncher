@@ -48,6 +48,11 @@ int main(void) {
         VpUiRect r=vp_ui_settings_row(i);
         assert(vp_ui_touch_settings_slot(r.x,r.y)==(int)i);
     }
+    {
+        VpUiRect r=vp_ui_settings_content_card();
+        assert(r.x==310 && r.y==148 && r.w==600 && r.h==270);
+        assert(r.x+r.w==910);
+    }
     assert(vp_ui_console_start(0,12)==0 && vp_ui_console_start(11,12)==4);
     assert(vp_ui_console_start(3,4)==0);
     assert(vp_ui_touch_tile_slot(47,158)==-1);
