@@ -1,8 +1,8 @@
-# Arquitectura de VitaPlus
+# Arquitectura de VitaShelf Launcher
 
 ## Principio
 
-VitaPlus es una shell con un catálogo unificado. Una fuente no dibuja pantallas: aporta `VpItem` al catálogo y declara acciones disponibles.
+VitaShelf Launcher es una shell con un catálogo unificado. Una fuente no dibuja pantallas: aporta `VpItem` al catálogo y declara acciones disponibles.
 
 ```text
 Vita2D UI
@@ -21,7 +21,7 @@ Vita2D UI
 
 ## Seguridad
 
-- Los providers nunca escriben paths arbitrarios: el backend resuelve el destino bajo `ux0:data/vitaplus/` o una ruta de plataforma permitida.
+- Los providers nunca escriben paths arbitrarios: el backend resuelve el destino bajo `ux0:data/vitashelflauncher/` o una ruta de plataforma permitida.
 - El token RomM no se imprime ni se incluye en logs.
 - La instalación de VPK siempre es una acción explícita del usuario en UI.
 - HTTPS debe verificar certificados; para LAN se recomienda HTTP explícito en una red de confianza antes que desactivar TLS.

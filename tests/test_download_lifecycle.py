@@ -7,8 +7,8 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-HEADER = (ROOT / "include" / "vitaplus.h").read_text()
-CORE = (ROOT / "src" / "core" / "vitaplus.c").read_text()
+HEADER = (ROOT / "include" / "vitashelflauncher.h").read_text()
+CORE = (ROOT / "src" / "core" / "vitashelflauncher.c").read_text()
 MAIN = (ROOT / "src" / "vita" / "main.c").read_text()
 RENDERER = (ROOT / "src" / "vita" / "ui_renderer.c").read_text()
 README = (ROOT / "README.md").read_text()
@@ -68,7 +68,7 @@ class VitaAppEventPollingTests(unittest.TestCase):
         cls.addClassCleanup(scratch.cleanup)
         cls.probe = pathlib.Path(scratch.name) / "app_events"
         prefix = r'''
-#include "vitaplus.h"
+#include "vitashelflauncher.h"
 #include <stdio.h>
 #include <stdlib.h>
 typedef struct { int systemEvent; } SceAppMgrSystemEvent;

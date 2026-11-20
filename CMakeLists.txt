@@ -5,22 +5,22 @@ if(DEFINED ENV{VITASDK} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
       CACHE FILEPATH "VitaSDK CMake toolchain")
 endif()
 
-project(vitaplus C)
+project(vitashelflauncher C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-add_library(vitaplus_core src/core/vitaplus.c)
-target_include_directories(vitaplus_core PUBLIC include)
-target_compile_options(vitaplus_core PRIVATE -Wall -Wextra -Werror)
+add_library(vitashelflauncher_core src/core/vitashelflauncher.c)
+target_include_directories(vitashelflauncher_core PUBLIC include)
+target_compile_options(vitashelflauncher_core PRIVATE -Wall -Wextra -Werror)
 
 if(DEFINED ENV{VITASDK})
   include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
-  set(VITA_APP_NAME "VitaPlus")
-  set(VITA_TITLEID "VPLUS0001")
+  set(VITA_APP_NAME "VitaShelf Launcher")
+  set(VITA_TITLEID "VSHELF001")
   set(VITA_VERSION "01.00")
 
-  add_executable(vitaplus
+  add_executable(vitashelflauncher
     src/vita/main.c
     src/vita/catalog_cache.c
     src/vita/ui_audio.c
@@ -30,14 +30,14 @@ if(DEFINED ENV{VITASDK})
     src/vita/ui_renderer.c
     src/vita/vita_backend.c)
   # Catch large automatic buffers before they can exhaust a Vita thread stack.
-  target_compile_options(vitaplus PRIVATE -Werror=frame-larger-than=16384)
-  target_link_libraries(vitaplus vitaplus_core vita2d freetype png jpeg curl zip z zstd bz2 lzma ssl crypto m pthread
+  target_compile_options(vitashelflauncher PRIVATE -Werror=frame-larger-than=16384)
+  target_link_libraries(vitashelflauncher vitashelflauncher_core vita2d freetype png jpeg curl zip z zstd bz2 lzma ssl crypto m pthread
     SceCtrl_stub SceTouch_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub SceCommonDialog_stub SceIme_stub
     ScePgf_stub SceIofilemgr_stub SceNet_stub SceNetCtl_stub SceSsl_stub SceSysmodule_stub SceAudio_stub
     ScePromoterUtil_stub_weak SceRtc_stub ScePower_stub)
   configure_file("$ENV{VITASDK}/arm-vita-eabi/ssl/openssl.cnf"
     "${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf" COPYONLY)
-  vita_create_self(eboot.bin vitaplus UNSAFE)
+  vita_create_self(eboot.bin vitashelflauncher UNSAFE)
   # Explicit inventory: every mapped system needs both its original logo and banner.
   # Only runtime resources are packaged; source vectors and previews stay in the repo.
   set(VP_BLUEGLASS_LOGOS
@@ -64,7 +64,7 @@ if(DEFINED ENV{VITASDK})
     list(APPEND VP_BLUEGLASS_FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/fonts/Inter-${weight}.ttf" "assets/blueglass/fonts/Inter-${weight}.ttf")
   endforeach()
-  vita_create_vpk(vitaplus.vpk ${VITA_TITLEID} eboot.bin
+  vita_create_vpk(vitashelflauncher.vpk ${VITA_TITLEID} eboot.bin
     VERSION ${VITA_VERSION}
      NAME ${VITA_APP_NAME}
      FILE ${CMAKE_CURRENT_SOURCE_DIR}/themes/default/theme.ini assets/default/theme.ini
@@ -83,5 +83,5 @@ if(DEFINED ENV{VITASDK})
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/06-descarga-completa.wav assets/audio/06-descarga-completa.wav
             ${VP_BLUEGLASS_FILES})
 else()
-  message(STATUS "VITASDK not set: only vitaplus_core is configured")
+  message(STATUS "VITASDK not set: only vitashelflauncher_core is configured")
 endif()

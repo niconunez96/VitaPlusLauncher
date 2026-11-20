@@ -1,6 +1,6 @@
 CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pedantic -Iinclude
-CORE = src/core/vitaplus.c
+CORE = src/core/vitashelflauncher.c
 TEST = build/test_core
 
 .PHONY: test test-ui test-vita-lifecycle test-assets test-renderer clean
@@ -25,7 +25,7 @@ build/test_presentation: src/vita/ui_presentation.c src/vita/ui_presentation.h t
 	@mkdir -p build
 	$(CC) $(CFLAGS) -Isrc/vita src/vita/ui_presentation.c tests/test_presentation.c -o $@
 
-build/test_catalog_cache: src/vita/catalog_cache.c src/vita/catalog_cache.h include/vitaplus.h tests/test_catalog_cache.c
+build/test_catalog_cache: src/vita/catalog_cache.c src/vita/catalog_cache.h include/vitashelflauncher.h tests/test_catalog_cache.c
 	@mkdir -p build
 	$(CC) $(CFLAGS) -Isrc/vita src/vita/catalog_cache.c tests/test_catalog_cache.c -o $@
 
@@ -36,11 +36,11 @@ test-assets:
 test-renderer: build/test_renderer
 	build/test_renderer
 
-build/test_renderer: src/vita/ui_renderer.c src/vita/ui_renderer.h src/vita/ui_presentation.c src/vita/ui_presentation.h src/vita/ui_text.c src/vita/ui_text.h src/vita/ui_backdrop.c src/vita/ui_backdrop.h src/core/vitaplus.c tests/preview_renderer.c tests/ui_stubs/vita2d.h tests/ui_stubs/psp2/io/fcntl.h tests/ui_stubs/psp2/kernel/processmgr.h include/vitaplus.h
+build/test_renderer: src/vita/ui_renderer.c src/vita/ui_renderer.h src/vita/ui_presentation.c src/vita/ui_presentation.h src/vita/ui_text.c src/vita/ui_text.h src/vita/ui_backdrop.c src/vita/ui_backdrop.h src/core/vitashelflauncher.c tests/preview_renderer.c tests/ui_stubs/vita2d.h tests/ui_stubs/psp2/io/fcntl.h tests/ui_stubs/psp2/kernel/processmgr.h include/vitashelflauncher.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -DVP_UI_TESTING -Isrc/vita -Itests/ui_stubs $$(pkg-config --cflags cairo freetype2 libpng) src/core/vitaplus.c src/vita/ui_presentation.c src/vita/ui_text.c src/vita/ui_backdrop.c src/vita/ui_renderer.c tests/preview_renderer.c $$(pkg-config --libs cairo freetype2 libpng) -lm -pthread -o $@
+	$(CC) $(CFLAGS) -DVP_UI_TESTING -Isrc/vita -Itests/ui_stubs $$(pkg-config --cflags cairo freetype2 libpng) src/core/vitashelflauncher.c src/vita/ui_presentation.c src/vita/ui_text.c src/vita/ui_backdrop.c src/vita/ui_renderer.c tests/preview_renderer.c $$(pkg-config --libs cairo freetype2 libpng) -lm -pthread -o $@
 
-$(TEST): $(CORE) tests/test_core.c include/vitaplus.h
+$(TEST): $(CORE) tests/test_core.c include/vitashelflauncher.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) $(CORE) tests/test_core.c -o $(TEST)
 

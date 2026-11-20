@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build the VitaPlus VPK inside the VitaSDK Docker image.
+# Build the VitaShelf Launcher VPK inside the VitaSDK Docker image.
 set -euo pipefail
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="$root_dir/dist/build-vita"
-vpk_path="$root_dir/dist/vitaplus.vpk"
+vpk_path="$root_dir/dist/vitashelflauncher.vpk"
 image="${VITASDK_IMAGE:-vitasdk/vitasdk:2026.08}"
 build_type="${CMAKE_BUILD_TYPE:-}"
 clean=0
@@ -13,7 +13,7 @@ usage() {
     cat <<'EOF'
 Usage: scripts/build-vpk.sh [options]
 
-Builds dist/vitaplus.vpk with Docker. No VitaSDK install is required on the host.
+Builds dist/vitashelflauncher.vpk with Docker. No VitaSDK install is required on the host.
 
 Options:
   --clean             Remove dist/build-vita before configuring.
@@ -90,8 +90,8 @@ remote_cmd+=" && cmake --build $(printf '%q' "$relative_build_dir") -j\$(nproc)"
 echo "==> Building with $image"
 docker run "${docker_args[@]}" "$image" bash -lc "$remote_cmd"
 
-if [[ ! -f "$build_dir/vitaplus.vpk" ]]; then
-    echo "error: $build_dir/vitaplus.vpk was not produced" >&2
+if [[ ! -f "$build_dir/vitashelflauncher.vpk" ]]; then
+    echo "error: $build_dir/vitashelflauncher.vpk was not produced" >&2
     exit 1
 fi
 
@@ -100,7 +100,7 @@ fi
 docker run "${docker_args[@]}" "$image" \
     chown -R "$(id -u):$(id -g)" "$relative_build_dir" >/dev/null 2>&1 || true
 
-cp "$build_dir/vitaplus.vpk" "$vpk_path"
+cp "$build_dir/vitashelflauncher.vpk" "$vpk_path"
 
 echo
 echo "VPK: $vpk_path"

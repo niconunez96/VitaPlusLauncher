@@ -197,7 +197,7 @@ static void header(const VpUiFrame *f) {
     static const char *icons[]={"ui_library","ui_store","ui_settings"};
     int i;
     icon("emblem",30,19,30);
-    text(f,VP_TYPE_BRAND,68,41,164,ink,"VitaPlus");
+    text(f,VP_TYPE_BRAND,68,41,164,ink,"VitaShelf Launcher");
     static const int tab_x[]={256,406,518},tab_w[]={146,108,120};
     round_rect(252,13,390,44,22,C(100,126,181,65));
     for (i=0;i<3;i++) {
@@ -359,7 +359,7 @@ static void settings(const VpUiFrame *f) {
     int i,section=f->settings_section;
     icon("ui_settings",44,199,54);
     text(f,VP_TYPE_PAGE_TITLE,104,239,200,ink,"Ajustes");
-    vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,48,280,222,3,C(222,233,255,240),"Personaliza tu experiencia en VitaPlus.");
+    vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,48,280,222,3,C(222,233,255,240),"Personaliza tu experiencia en VitaShelf Launcher.");
     if (!f->settings_detail) {
         for (i=0;i<6;i++) {
             VpUiRect r=vp_ui_settings_row((size_t)i); glass(r,section==i,false);
@@ -420,13 +420,13 @@ static void settings(const VpUiFrame *f) {
         icon(icons[section],334,168,48);
         text(f,VP_TYPE_HERO_TITLE,400,203,470,ink,names[section]);
         if (section==1) {
-            (void)snprintf(detail,sizeof(detail),"Tema: %s\nInter · 960 × 544\nTriángulo cambia la vista de la biblioteca.\nTemas: ux0:data/vitaplus/themes/<tema>/theme.ini",f->app->theme.name);
+            (void)snprintf(detail,sizeof(detail),"Tema: %s\nInter · 960 × 544\nTriángulo cambia la vista de la biblioteca.\nTemas: ux0:data/vitashelflauncher/themes/<tema>/theme.ini",f->app->theme.name);
         } else if (section==4) {
-            (void)snprintf(detail,sizeof(detail),"Libre: %.1f GiB / %.1f GiB\nDescargas: ux0:data/vitaplus/downloads/\nImágenes: ux0:data/vitaplus/cache/covers/",f->storage_free/1073741824.,f->storage_total/1073741824.);
+            (void)snprintf(detail,sizeof(detail),"Libre: %.1f GiB / %.1f GiB\nDescargas: ux0:data/vitashelflauncher/downloads/\nImágenes: ux0:data/vitashelflauncher/cache/covers/",f->storage_free/1073741824.,f->storage_total/1073741824.);
         } else if (section==5) {
-            (void)snprintf(detail,sizeof(detail),"VitaPlus · Blueglass\nBiblioteca y launcher para PS Vita / PSTV.\nTipografía Inter por The Inter Project Authors.\nLogos y marcas pertenecen a sus respectivos titulares.");
+            (void)snprintf(detail,sizeof(detail),"VitaShelf Launcher · Blueglass\nBiblioteca y launcher para PS Vita / PSTV.\nTipografía Inter por The Inter Project Authors.\nLogos y marcas pertenecen a sus respectivos titulares.");
         } else {
-            (void)snprintf(detail,sizeof(detail),"%u juegos en tu biblioteca.\nUsa L / R para cambiar de sección.\nDescargas y sincronización en segundo plano.\nSTART pausa las descargas y sale de VitaPlus.",(unsigned)f->app->catalog.count);
+            (void)snprintf(detail,sizeof(detail),"%u juegos en tu biblioteca.\nUsa L / R para cambiar de sección.\nDescargas y sincronización en segundo plano.\nSTART pausa las descargas y sale de VitaShelf Launcher.",(unsigned)f->app->catalog.count);
         }
         vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,338,254,546,7,ink,detail);
     }

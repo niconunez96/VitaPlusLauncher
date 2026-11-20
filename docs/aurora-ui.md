@@ -106,7 +106,7 @@ The portable `VpTheme` and catalog layout are unchanged. New presentation-only k
 | `ui_wallpaper_alpha` | 130 | 0–255 |
 
 Missing values retain defaults; malformed/out-of-range values are ignored. User theme
-overrides are still read from `ux0:data/vitaplus/themes/<theme>/theme.ini`. Bundled
+overrides are still read from `ux0:data/vitashelflauncher/themes/<theme>/theme.ini`. Bundled
 icon replacement from external theme directories is not implemented in this pass.
 
 ## On-device acceptance (pending)

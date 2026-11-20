@@ -150,7 +150,7 @@ int main(int argc,char **argv) {
     cr=cairo_create(canvas); assert(!FT_Init_FreeType(&freetype)); assert(vp_ui_fonts_load(&typefaces));
     assert(vp_ui_backdrop_init());
     vp_app_init(&app);
-    assert(vp_theme_load(&app.theme,"name=VitaPlus Blueglass\nbackground=#354b7c\nsurface=#8da9e6\naccent=#4f9fff\ntext=#fafcff\nmuted=#ccdff9\n"));
+    assert(vp_theme_load(&app.theme,"name=VitaShelf Launcher Blueglass\nbackground=#354b7c\nsurface=#8da9e6\naccent=#4f9fff\ntext=#fafcff\nmuted=#ccdff9\n"));
     for (i=0;i<12;i++) {
         VpItem item={0};
         (void)snprintf(item.id,sizeof(item.id),"romm:%u",(unsigned)i);

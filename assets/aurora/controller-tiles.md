@@ -23,7 +23,7 @@ Nintendo 3DS uses `platform_n3ds.png`; PS1 uses `platform_psx.png`. Earlier Drea
 
 Platform aliases and texture registrations include all twelve requested platforms, and the RomM settings section uses `ui_romm`. Small labels have a minimum `.75` scale with final-scale width measurement and UTF-8-safe truncation; card titles and notices can use two lines. Host tests and previews check the selected artwork and text boundaries. Physical-Vita PGF readability has not been verified; host previews cannot certify it.
 
-The local Debug build at `dist/vitaplus.vpk` passed archive integrity and source-byte checks for all selected images and RomM notices. Host suites and independent ASan/UBSan renderer probes passed. The package contains 42 runtime PNGs total; source previews and generation-account metadata are excluded. Install and inspect the trial package on physical Vita before treating native readability or performance as verified.
+The local Debug build at `dist/vitashelflauncher.vpk` passed archive integrity and source-byte checks for all selected images and RomM notices. Host suites and independent ASan/UBSan renderer probes passed. The package contains 42 runtime PNGs total; source previews and generation-account metadata are excluded. Install and inspect the trial package on physical Vita before treating native readability or performance as verified.
 
 ## Provenance
 
